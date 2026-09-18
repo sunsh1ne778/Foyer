@@ -1,0 +1,6 @@
+{
+  "name": "FileStore Platform",
+  "description": "基于 VFS 单通道内核与统一 mount:path 契约的高性能多存储管理平台",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
