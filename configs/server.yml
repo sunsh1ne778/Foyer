@@ -1,0 +1,8 @@
+listen: ":8090"
+s3_listen: ":8091"
+postgres_dsn: ${FILESTORE_PG_DSN}
+redis_url: ${FILESTORE_REDIS_URL}
+auth:
+  username: admin
+otel:
+  endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}

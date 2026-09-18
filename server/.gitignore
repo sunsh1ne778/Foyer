@@ -1,0 +1,8 @@
+*.exe
+*.db
+.DS_Store
+.env
+/bin/
+cmd/server/server.exe
+cmd/worker/worker.exe
+cmd/cli/cli.exe

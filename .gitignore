@@ -6,3 +6,18 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Go server binaries
+server/bin/
+server/**/*.exe
+
+# Legacy runtime data
+legacy/server/data/
+
+# Web console build artifacts
+web/node_modules/
+web/dist/
+console/node_modules/
+console/dist/
+legacy/web/node_modules/
+legacy/web/dist/

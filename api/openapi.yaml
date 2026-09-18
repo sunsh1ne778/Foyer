@@ -1,0 +1,258 @@
+openapi: 3.0.3
+info:
+  title: Filestore API
+  version: 1.0.0
+servers:
+  - url: /
+paths:
+  /v1/health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+  /v1/login:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  username: { type: string }
+  /v1/mounts:
+    get:
+      operationId: listMounts
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: mounts
+    post:
+      operationId: createMount
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                type: { type: string }
+                spec:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "200":
+          description: mount
+  /v1/mounts/{id}:
+    patch:
+      operationId: patchMount
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: mount }
+    delete:
+      operationId: deleteMount
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "204": { description: deleted }
+  /v1/mounts/{id}/probe:
+    post:
+      operationId: probeMount
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: ok }
+  /v1/mounts/{id}/unmount:
+    post:
+      operationId: unmount
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: ok }
+  /v1/mounts/{id}/mount:
+    post:
+      operationId: remount
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: ok }
+  /v1/mounts/{id}/reconcile:
+    post:
+      operationId: reconcile
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: ok }
+        "202": { description: job }
+  /v1/fs/list:
+    get:
+      operationId: fsList
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/p"
+      responses:
+        "200": { description: entries }
+  /v1/fs/stat:
+    get:
+      operationId: fsStat
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/p"
+      responses:
+        "200": { description: info }
+  /v1/fs/mkdir:
+    post:
+      operationId: fsMkdir
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/p"
+      responses:
+        "200": { description: ok }
+  /v1/fs:
+    get:
+      operationId: fsRead
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/p"
+      responses:
+        "200": { description: stream }
+        "307": { description: redirect }
+    delete:
+      operationId: fsRemove
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/p"
+      responses:
+        "204": { description: deleted }
+  /v1/fs/writes:
+    post:
+      operationId: writeBegin
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p]
+              properties:
+                p: { type: string }
+                size: { type: integer, format: int64 }
+                mime: { type: string }
+      responses:
+        "200": { description: session }
+  /v1/fs/writes/{id}/parts/{n}:
+    put:
+      operationId: writePart
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - name: n
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: ok }
+  /v1/fs/writes/{id}/complete:
+    post:
+      operationId: writeComplete
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: ok }
+  /v1/fs/writes/{id}:
+    delete:
+      operationId: writeAbort
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "204": { description: aborted }
+  /v1/fs/copy:
+    post:
+      operationId: fsCopy
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyBody"
+      responses:
+        "200": { description: done }
+        "202": { description: job }
+  /v1/fs/move:
+    post:
+      operationId: fsMove
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyBody"
+      responses:
+        "200": { description: done }
+        "202": { description: job }
+  /v1/jobs/{id}:
+    get:
+      operationId: getJob
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { description: job }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    p:
+      name: p
+      in: query
+      required: true
+      schema: { type: string }
+      description: "mount:path"
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    CopyBody:
+      type: object
+      required: [src, dst]
+      properties:
+        src: { type: string }
+        dst: { type: string }
+        async: { type: boolean }
