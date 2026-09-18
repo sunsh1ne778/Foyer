@@ -18,8 +18,11 @@ services:
 
   redis:
     image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "16379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -58,7 +61,36 @@ services:
           aws --endpoint-url http://rustfs:9000 s3 mb s3://filestore && break
           sleep 3
         done
+        aws --endpoint-url http://rustfs:9000 s3 mb s3://jfs || true
         true
+
+  foyer:
+    profiles: ["juicefs"]
+    build:
+      context: ..
+      dockerfile: deploy/foyer/Dockerfile
+    ports:
+      - "19002:9002"
+      - "8092:8092"
+    environment:
+      FOYER_META_URL: redis://redis:6379/1
+      FOYER_STORAGE: minio
+      FOYER_BUCKET: http://rustfs:9000/jfs
+      FOYER_ACCESS_KEY: rustfsadmin
+      FOYER_SECRET_KEY: rustfsadmin
+      FOYER_GATEWAY_LISTEN: "0.0.0.0:9002"
+      FOYER_ADMIN_LISTEN: ":8092"
+      FOYER_VOLUME: foyer
+      FOYER_JUICEFS_BIN: /usr/local/bin/juicefs
+      MINIO_ROOT_USER: foyerak
+      MINIO_ROOT_PASSWORD: foyersecret
+    depends_on:
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      rustfs-init:
+        condition: service_completed_successfully
 
   api:
     profiles: ["app"]
@@ -134,4 +166,5 @@ services:
 
 volumes:
   pg-data:
+  redis-data:
   rustfs-data:

@@ -1,0 +1,21 @@
+# Compose foyer build uses context `..` (repo root). Keep the context small.
+*
+!third_party/
+!third_party/juicefs/
+!third_party/juicefs/**
+!overlays/
+!overlays/juicefs/
+!overlays/juicefs/**
+!server/
+!server/**
+
+# JuiceFS source is enough; skip VCS and local binaries if they snuck in.
+third_party/juicefs/.git
+**/.git
+**/foyer.exe
+server/foyer.exe
+**/*.exe
+hello.txt
+hello-back.txt
+hello-back-native.txt
+web/
