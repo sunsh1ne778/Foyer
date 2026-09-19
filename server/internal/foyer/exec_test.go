@@ -47,6 +47,7 @@ func writeFakeJuice(t *testing.T, statusOK bool) string {
 	script += "if [ \"$1\" = format ]; then echo FORMAT \"$@\" > \"$(dirname \"$0\")/out.txt\"; exit 0; fi\n"
 	script += "if [ \"$1\" = import ]; then printf '%s\\n' '{\"dry_run\":false,\"dest\":\"/photos\",\"scanned\":2,\"imported\":1,\"skipped\":1,\"mtime_kept\":1,\"mtime_missing\":0,\"mode_kept\":1,\"owner_kept\":0,\"dir_mtime_kept\":0}'; exit 0; fi\n"
 	script += "if [ \"$1\" = stat ]; then shift 2; for p in \"$@\"; do printf '{\"path\":\"%s\",\"inode\":42,\"type\":\"directory\",\"mode\":493,\"uid\":0,\"gid\":0,\"size\":4096,\"nlink\":3,\"mtime\":1777690800,\"mtimensec\":123456789}\\n' \"$p\"; done; exit 0; fi\n"
+	script += "if [ \"$1\" = usage ]; then shift 2; printf '%s' '{\"volume\":{\"capacity\":0,\"capacity_set\":false,\"used\":1919472140288,\"used_inodes\":2538,\"avail\":0,\"avail_inodes\":0},\"summaries\":['; first=1; for p in \"$@\"; do if [ $first -eq 0 ]; then printf ','; fi; first=0; printf '{\"path\":\"%s\",\"size\":24576,\"length\":20480,\"files\":4,\"dirs\":2,\"inodes\":6}' \"$p\"; done; printf ']}\\n'; exit 0; fi\n"
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +87,16 @@ func main() {
 		for _, p := range os.Args[3:] {
 			fmt.Printf("{\"path\":\"%s\",\"inode\":42,\"type\":\"directory\",\"mode\":493,\"uid\":0,\"gid\":0,\"size\":4096,\"nlink\":3,\"mtime\":1777690800,\"mtimensec\":123456789}\n", p)
 		}
+		os.Exit(0)
+	case "usage":
+		fmt.Print("{\"volume\":{\"capacity\":0,\"capacity_set\":false,\"used\":1919472140288,\"used_inodes\":2538,\"avail\":0,\"avail_inodes\":0},\"summaries\":[")
+		for i, p := range os.Args[3:] {
+			if i > 0 {
+				fmt.Print(",")
+			}
+			fmt.Printf("{\"path\":\"%s\",\"size\":24576,\"length\":20480,\"files\":4,\"dirs\":2,\"inodes\":6}", p)
+		}
+		fmt.Println("]}")
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown: %s\n", os.Args[1])
