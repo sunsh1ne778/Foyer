@@ -27,6 +27,9 @@ export const NewMountModal: React.FC = () => {
   const [hostHint, setHostHint] = useState<{ host_data?: string; host_mount?: string; host_drives?: string[] }>({});
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
+  // 真正的导入请求可能跑很久（建挂载 + 逐对象导入）。没有这个状态时按钮会
+  // 保持可点、也没有任何反馈，用户会以为没生效而重复点，重复发起导入。
+  const [submitting, setSubmitting] = useState(false);
 
   // S3 / MinIO spec
   const [endpoint, setEndpoint] = useState('https://s3.us-west-2.amazonaws.com');
@@ -207,11 +210,14 @@ export const NewMountModal: React.FC = () => {
     }
 
     try {
+      setSubmitting(true);
       await addMount({ name: cleanName, type: driverType, spec });
       setIsNewMountOpen(false);
       setPreview(null);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '创建挂载失败，请检查 spec 与后端日志');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -228,7 +234,8 @@ export const NewMountModal: React.FC = () => {
           </div>
           <button
             onClick={() => setIsNewMountOpen(false)}
-            className="p-1 rounded-md hover:bg-slate-200/70 text-slate-400 hover:text-slate-700 transition-colors"
+            disabled={submitting}
+            className="p-1 rounded-md hover:bg-slate-200/70 text-slate-400 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <X className="w-4 h-4" />
           </button>
@@ -551,6 +558,7 @@ export const NewMountModal: React.FC = () => {
           <div className="pt-2 border-t border-slate-200 flex items-center justify-end gap-2">
             <button
               type="button"
+              disabled={submitting}
               onClick={() => {
                 if (preview) {
                   setPreview(null);
@@ -558,16 +566,21 @@ export const NewMountModal: React.FC = () => {
                 }
                 setIsNewMountOpen(false);
               }}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               {preview ? '返回修改' : '取消'}
             </button>
             <button
               type="submit"
-              disabled={previewing || (preview !== null && preview.scanned === 0)}
+              disabled={submitting || previewing || (preview !== null && preview.scanned === 0)}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium shadow-xs transition-colors disabled:bg-slate-300"
             >
-              {previewing ? (
+              {submitting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{preview ? '导入中…' : '创建中…'}</span>
+                </>
+              ) : previewing ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   <span>预检中…</span>
