@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Activity,
   UploadCloud,
+  Download,
   FolderPlus,
   BookOpen,
   HardDrive,
@@ -42,6 +43,7 @@ export const Header: React.FC = () => {
     username,
     logout,
     refreshDirectory,
+    setIsExportOpen,
   } = useFileStore();
 
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -331,6 +333,16 @@ export const Header: React.FC = () => {
 
           {currentTab === 'files' && (
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsExportOpen(true)}
+                disabled={!currentMount}
+                title="把当前分区或当前目录的元数据导出为报表"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-colors disabled:opacity-40"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-500" />
+                <span>导出元数据</span>
+              </button>
+
               <button
                 onClick={() => setIsNewFolderOpen(true)}
                 className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-colors"

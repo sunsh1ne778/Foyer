@@ -73,6 +73,8 @@ interface FileStoreContextType {
   setCopyMoveTarget: (node: FSNode | null) => void;
   isCopyMoveMoveMode: boolean;
   setIsCopyMoveMoveMode: (val: boolean) => void;
+  isExportOpen: boolean;
+  setIsExportOpen: (open: boolean) => void;
 
   getCurrentMountObj: () => Mount | undefined;
   listCurrentNodes: () => FSNode[];
@@ -132,6 +134,7 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isCopyMoveOpen, setIsCopyMoveOpen] = useState(false);
   const [copyMoveTarget, setCopyMoveTarget] = useState<FSNode | null>(null);
   const [isCopyMoveMoveMode, setIsCopyMoveMoveMode] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
 
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const mountsRef = useRef(mounts);
@@ -605,6 +608,8 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setCopyMoveTarget,
         isCopyMoveMoveMode,
         setIsCopyMoveMoveMode,
+        isExportOpen,
+        setIsExportOpen,
         getCurrentMountObj,
         listCurrentNodes,
         createFolder,

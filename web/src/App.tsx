@@ -13,6 +13,7 @@ import { UploadModal } from './components/UploadModal';
 import { NewMountModal } from './components/NewMountModal';
 import { NewFolderModal } from './components/NewFolderModal';
 import { CopyMoveModal } from './components/CopyMoveModal';
+import { ExportReportModal } from './components/ExportReportModal';
 
 const MainLayout: React.FC = () => {
   const { currentTab, selectedNode, apiError, clearApiError } = useFileStore();
@@ -51,6 +52,7 @@ const MainLayout: React.FC = () => {
       <NewMountModal />
       <NewFolderModal />
       <CopyMoveModal />
+      <ExportReportModal />
     </div>
   );
 };
