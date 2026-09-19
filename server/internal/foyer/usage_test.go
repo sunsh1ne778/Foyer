@@ -17,18 +17,39 @@ func TestUsageArgsOmitsPathsWhenNone(t *testing.T) {
 }
 
 func TestParseUsageSkipsLogLines(t *testing.T) {
-	text := "2026/09/19 08:33:31 juicefs[656] <INFO>: Ping redis latency: 51.779µs\n" +
-		`{"volume":{"capacity":0,"capacity_set":false,"used":1919472140288,"used_inodes":2538,"avail":0,"avail_inodes":0},` +
-		`"summaries":[{"path":"/dtest2","size":24576,"length":20480,"files":4,"dirs":2,"inodes":6}]}` + "\n"
-	got, err := parseUsage(text)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Volume.Used != 1919472140288 || got.Volume.CapacitySet {
-		t.Fatalf("volume: %+v", got.Volume)
-	}
-	if len(got.Summaries) != 1 || got.Summaries[0].Inodes != 6 || got.Summaries[0].Size != 24576 {
-		t.Fatalf("summaries: %+v", got.Summaries)
+	jsonLine := `{"volume":{"capacity":0,"capacity_set":false,"used":1919472140288,"used_inodes":2538,"avail":0,"avail_inodes":0},` +
+		`"summaries":[{"path":"/dtest2","size":24576,"length":20480,"files":4,"dirs":2,"inodes":6}]}`
+
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{
+			name: "leading log line",
+			text: "2026/09/19 08:33:31 juicefs[656] <INFO>: Ping redis latency: 51.779µs\n" + jsonLine + "\n",
+		},
+		{
+			name: "trailing log line",
+			text: jsonLine + "\n2026/09/19 08:33:31 juicefs[656] <INFO>: flush done\n",
+		},
+		{
+			name: "log lines on both sides",
+			text: "2026/09/19 08:33:31 juicefs[656] <INFO>: Ping redis latency: 51.779µs\n" +
+				jsonLine + "\n2026/09/19 08:33:31 juicefs[656] <INFO>: flush done\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseUsage(tc.text)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Volume.Used != 1919472140288 || got.Volume.CapacitySet {
+				t.Fatalf("volume: %+v", got.Volume)
+			}
+			if len(got.Summaries) != 1 || got.Summaries[0].Inodes != 6 || got.Summaries[0].Size != 24576 {
+				t.Fatalf("summaries: %+v", got.Summaries)
+			}
+		})
 	}
 }
 
@@ -53,12 +74,17 @@ func TestRunnerUsageParsesFakeBin(t *testing.T) {
 }
 
 // 容量解析规则只应有一处：配额优先，否则物理盘总量。
+// CapacitySet 是 CLI 契约的透传（「卷是否设了配额」），不表示「分母是否解析出来」；
+// 分母是否存在看 Capacity != 0。
 func TestBuildUsageResponsePrefersQuotaOverDisk(t *testing.T) {
 	disk := DiskSpace{Total: 1000, Used: 400, Free: 600}
 
-	// 未设配额 -> 用物理盘总量当分母。
+	// 未设配额 -> 用物理盘总量当分母，但 capacity_set 仍为 false（没有配额）。
 	unset := BuildUsageResponse(VolumeUsage{Used: 10, UsedInodes: 3}, disk, true, nil)
-	if !unset.Volume.CapacitySet || unset.Volume.Capacity != 1000 {
+	if unset.Volume.CapacitySet {
+		t.Fatalf("未设配额时 capacity_set 必须为 false: %+v", unset.Volume)
+	}
+	if unset.Volume.Capacity != 1000 {
 		t.Fatalf("未设配额应回退物理盘总量: %+v", unset.Volume)
 	}
 	if unset.Volume.DiskTotal != 1000 || unset.Volume.DiskUsed != 400 {
