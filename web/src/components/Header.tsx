@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   FolderTree,
   ChevronRight,
@@ -49,6 +49,13 @@ export const Header: React.FC = () => {
   const [isEditingPath, setIsEditingPath] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isMountDropdownOpen, setIsMountDropdownOpen] = useState(false);
+  const pathScrollRef = useRef<HTMLDivElement>(null);
+
+  // 路径变化时把面包屑自动滚到最右，保证当前目录始终可见。
+  useEffect(() => {
+    const el = pathScrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [currentMount, currentPath]);
 
   // Active running jobs
   const runningJobsCount = jobs.filter(j => j.status === 'running').length;
@@ -140,7 +147,7 @@ export const Header: React.FC = () => {
           </button>
 
           {/* Interactive Path pill */}
-          <div className="flex-1 relative">
+          <div className="flex-1 min-w-0 relative">
             {isEditingPath ? (
               <form onSubmit={handlePathSubmit} className="flex items-center w-full">
                 <input
@@ -157,10 +164,15 @@ export const Header: React.FC = () => {
               <div
                 onClick={() => setIsEditingPath(true)}
                 title="点击直接编辑 mount:path 路径"
-                className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg hover:border-slate-300 hover:bg-white cursor-text transition-all group overflow-x-auto text-slate-700"
+                className="flex items-center gap-1.5 font-mono text-xs pl-2.5 pr-1 py-1.5 bg-slate-50 border border-slate-200 rounded-lg hover:border-slate-300 hover:bg-white cursor-text transition-all group text-slate-700 min-w-0"
               >
+                {/* Scrollable breadcrumb body: 单行裁切，超长路径内部横向滚动而不是撑大整条 header */}
+                <div
+                  ref={pathScrollRef}
+                  className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar whitespace-nowrap"
+                >
                 {/* Mount Selector / Pill with dropdown */}
-                <div className="relative">
+                <div className="relative shrink-0">
                   <button
                     type="button"
                     onClick={e => {
@@ -206,7 +218,7 @@ export const Header: React.FC = () => {
                     e.stopPropagation();
                     navigateTo(currentMount, '/');
                   }}
-                  className="hover:text-indigo-600 hover:underline cursor-pointer text-slate-500"
+                  className="hover:text-indigo-600 hover:underline cursor-pointer text-slate-500 shrink-0"
                 >
                   /
                 </span>
@@ -222,7 +234,8 @@ export const Header: React.FC = () => {
                           e.stopPropagation();
                           navigateTo(currentMount, subPath);
                         }}
-                        className={`hover:text-indigo-600 hover:underline cursor-pointer ${
+                        title={seg}
+                        className={`shrink-0 max-w-[16rem] truncate hover:text-indigo-600 hover:underline cursor-pointer ${
                           isLast ? 'text-slate-900 font-medium' : 'text-slate-500'
                         }`}
                       >
@@ -232,13 +245,14 @@ export const Header: React.FC = () => {
                     </React.Fragment>
                   );
                 })}
+                </div>
 
                 {/* Quick copy Ref */}
                 <button
                   type="button"
                   onClick={handleCopyRef}
                   title="复制路径 (mount:path)"
-                  className="ml-auto text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-200/60 shrink-0"
+                  className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-200/60 shrink-0"
                 >
                   {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                 </button>
