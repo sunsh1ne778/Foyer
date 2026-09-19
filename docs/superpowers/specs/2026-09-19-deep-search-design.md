@@ -167,7 +167,7 @@ GET /foyer/search?q=%23整理&path=/av_20260619
 - `runDeepSearch(keyword: string)`：trim 空则忽略；置 loading；调 `jfs.foyerSearch`；成功后 `attributeMatches(mountsRef.current, res.matches)`；失败置 `error`（不弹全局错误）。
 - `exitDeepSearch()`：清空并回到目录视图。
 - `revealHit(hit)`：记录 `pendingRevealKey = hit.key`，然后 `navigateTo(hit.mount, parentKey(hit.key))`。
-- 目录加载完成的 effect 里：若 `pendingRevealKey` 命中本层 `nodes` 则 `setSelectedNode` 并清空；若本层加载完成但未命中（目标已不在），也清空，避免悬挂。
+- 目录加载完成的 effect 里：若 `pendingRevealKey` 命中本层 `nodes` 则 `setSelectedNode` 并清空；若停在目标目录但本层未命中，**不清空**——`listPrefix` 只发一次 `ListObjectsV2`、单目录列表被截在 1000 条，命中可能不在这一页里，清空会让跳转静默失效。「避免悬挂」由**限定生命周期**保证：揭示只在「一次点击 → 到达目标目录」这一窗口内有效，用户一旦导航离开目标目录即清空。
 
 ### FileExplorer
 

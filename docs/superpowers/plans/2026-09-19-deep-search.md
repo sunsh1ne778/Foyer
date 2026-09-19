@@ -1768,12 +1768,27 @@ const EMPTY_DEEP_SEARCH: DeepSearchState = {
     pendingReveal.current = null;
     setSelectedNode(hit);
   }, [revealTick, nodes, currentMount, currentPath]);
+
+  // 揭示意图的生命周期封口：用户一旦导航离开目标目录，这次点击就过期了，清掉——
+  // 否则它会一直上膛，日后某次手动进入同一目录时被自动选中（spec 要避免的「悬挂」）。
+  // 刻意**不**在「停在目标目录但本层没有该 key」时清空：目录列表被 listPrefix 的单次
+  // ListObjectsV2 截在 1000 条（web/src/api/jfs.ts:133，无 continuation-token 循环），
+  // 大目录里的命中可能不在本层 nodes 里，清空会让跳转静默失效。
+  useEffect(() => {
+    const reveal = pendingReveal.current;
+    if (!reveal) return;
+    if (reveal.mount === currentMount && reveal.parent === currentPath) return;
+    pendingReveal.current = null;
+  }, [currentMount, currentPath]);
 ```
 
-> 两个守卫缺一不可：`nodesOwnerRef` 挡「在途的旧目录请求用同名 key 提前消费」，
+> 两个守卫仍然缺一不可：`nodesOwnerRef` 挡「在途的旧目录请求用同名 key 提前消费」，
 > `currentMount`/`currentPath` 挡「用户已经离开目标目录」。
-> `!hit` 时**故意不清空** `pendingReveal`：目标暂时不在（例如刚被删）时留待下次回到该目录再认，
-> 且 key 是完整挂载内路径，不可能选中别的文件。
+> 但「停在目标目录、本层 `nodes` 里却没有该 key」时**故意不清空** `pendingReveal`：`listPrefix`
+> 只发一次 `ListObjectsV2`、没有 continuation-token 循环（`web/src/api/jfs.ts:133`），
+> 单目录列表被截在 1000 条，命中可能不在这一页里（`/av_20260619` 已 800 条），清空会让跳转静默失效。
+> 「避免悬挂」改由**限定生命周期**满足：揭示的上膛窗口恰好是「一次点击 → 到达目标目录」，
+> 此后的任何一次导航离开都会由上面的封口 effect 清掉这次意图。
 
 - [ ] **Step 4: 挂进 provider value**
 

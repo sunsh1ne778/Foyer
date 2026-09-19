@@ -340,6 +340,18 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setSelectedNode(hit);
   }, [revealTick, nodes, currentMount, currentPath]);
 
+  // 揭示意图的生命周期封口：用户一旦导航离开目标目录，这次点击就过期了，清掉——
+  // 否则它会一直上膛，日后某次手动进入同一目录时被自动选中（spec 要避免的「悬挂」）。
+  // 刻意**不**在「停在目标目录但本层没有该 key」时清空：目录列表被 listPrefix 的单次
+  // ListObjectsV2 截在 1000 条（web/src/api/jfs.ts:133，无 continuation-token 循环），
+  // 大目录里的命中可能不在本层 nodes 里，清空会让跳转静默失效。
+  useEffect(() => {
+    const reveal = pendingReveal.current;
+    if (!reveal) return;
+    if (reveal.mount === currentMount && reveal.parent === currentPath) return;
+    pendingReveal.current = null;
+  }, [currentMount, currentPath]);
+
   useEffect(() => {
     setPathInput(currentMount ? `${currentMount}:${currentPath}` : '');
     setSelectedKeys(new Set());

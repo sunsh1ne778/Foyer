@@ -149,3 +149,134 @@ deps 里 `revealTick` 覆盖「无加载」路径，`nodes` 覆盖「加载回�
 
 原 Concerns 第 1 条已由本轮修复解决。第 2 条仍旧：目标目录列表请求失败时 `pendingReveal` 保留到下一次同 mount/path 的匹配（仍不清除），风险低，未按个人判断改动。
 
+---
+
+# Final review fix round — 揭示意图的悬挂：限定生命周期
+
+## Finding（整支分支终审的 Important 项）
+
+`pendingReveal` 只在**成功消费**、显式 `exitDeepSearch`、新的 `revealHit`、`logout` 四处被清空。若用户点「跳转」进入某目录，而该目录的 entries 到位后**不含**该 key，揭示会一直保持上膛，日后某次无关的手动进入同一 mount/path 时被自动选中——这正是设计 spec 点名的「悬挂」，spec 要求避免。
+
+## 决策与理由（人类已定，未再审）
+
+- **不在「停在目标层但未命中」时清空。** `listPrefix`（`web/src/api/jfs.ts:133`）只发**一次** `ListObjectsV2`，没有 continuation-token 循环，任何目录列表都被截在 1000 条；本卷 `/av_20260619` 挂载已有 800 条。命中可能根本不在这一页的 `nodes` 里，若在 `!hit` 处清空，跳转会对这种大目录**静默失效**。
+- **改为限定生命周期。** 保留目标层的上膛状态，但用户一旦导航**离开**目标目录立即清空。于是揭示的有效窗口恰好是「一次点击 → 到达目标目录」，既不会悬挂过久，也不会因分页截断而误清。
+
+## 改动
+
+**1. `web/src/context/FileStoreContext.tsx:343-353`**（消费 effect 之后、`setPathInput` effect 之前）新增封口 effect：
+
+```tsx
+  // 揭示意图的生命周期封口：用户一旦导航离开目标目录，这次点击就过期了，清掉——
+  // 否则它会一直上膛，日后某次手动进入同一目录时被自动选中（spec 要避免的「悬挂」）。
+  // 刻意**不**在「停在目标目录但本层没有该 key」时清空：目录列表被 listPrefix 的单次
+  // ListObjectsV2 截在 1000 条（web/src/api/jfs.ts:133，无 continuation-token 循环），
+  // 大目录里的命中可能不在本层 nodes 里，清空会让跳转静默失效。
+  useEffect(() => {
+    const reveal = pendingReveal.current;
+    if (!reveal) return;
+    if (reveal.mount === currentMount && reveal.parent === currentPath) return;
+    pendingReveal.current = null;
+  }, [currentMount, currentPath]);
+```
+
+消费 effect（`:328-342`）的 `!hit` 早退逻辑与 `nodesOwnerRef` 守卫均未改动。该文件其它内容未动。
+
+**2. `docs/superpowers/plans/2026-09-19-deep-search.md`** Task 6 Step 3：在 `:1786` 附近的代码块里，消费 effect 之后原样插入同一段封口 effect（`:1772-1782`）；并把其下的 blockquote（原 `:1772-1776`）改写为：两个守卫仍缺一不可；`!hit` 故意不清空并给出 `listPrefix` 单次 `ListObjectsV2` / 1000 条上限、`/av_20260619` 已 800 条的理由；「避免悬挂」改由限定生命周期满足（窗口 = 一次点击 → 到达目标目录，任何一次离开即清）。
+
+**3. `docs/superpowers/specs/2026-09-19-deep-search-design.md:170`**：把「若本层加载完成但未命中（目标已不在），也清空，避免悬挂。」替换为「若停在目标目录但本层未命中，**不清空**——`listPrefix` 只发一次 `ListObjectsV2`、单目录列表被截在 1000 条，命中可能不在这一页里，清空会让跳转静默失效。「避免悬挂」由**限定生命周期**保证：揭示只在『一次点击 → 到达目标目录』这一窗口内有效，用户一旦导航离开目标目录即清空。」该节其余内容未动。
+
+## 验证合同
+
+工作目录 `e:/workspace-dev/Foyer/web`。命令用 `;` 串联、逐条回显退出码：
+
+```
+npx tsc --noEmit; "TSC_EXIT=$LASTEXITCODE"; npx vitest run; "VITEST_EXIT=$LASTEXITCODE"
+```
+
+输出（逐字）：
+
+```
+TSC_EXIT=0
+
+ RUN  v3.2.7 E:/workspace-dev/Foyer/web
+
+ ✓ src/report/format.test.ts (15 tests) 5ms
+ ✓ src/report/paths.test.ts (12 tests) 4ms
+ ✓ src/utils/hostPath.test.ts (7 tests) 5ms
+ ✓ src/cli/parse.test.ts (5 tests) 4ms
+ ✓ src/api/hostDir.test.ts (5 tests) 5ms
+ ✓ src/api/mappers.test.ts (3 tests) 6ms
+ ✓ src/report/walk.test.ts (17 tests) 13ms
+ ✓ src/api/browse.test.ts (4 tests) 6ms
+ ✓ src/api/search.fetch.test.ts (5 tests) 8ms
+ ✓ src/api/search.test.ts (15 tests) 9ms
+ ✓ src/api/mounts.test.ts (11 tests) 8ms
+ ✓ src/report/live.list.test.ts (1 test) 4ms
+ ✓ src/report/build.test.ts (14 tests) 8ms
+ ✓ src/report/live.test.ts (6 tests) 9ms
+ ✓ src/cli/run.test.ts (5 tests) 31ms
+ ✓ src/utils/capacity.test.ts (2 tests) 3ms
+ ✓ src/api/stat.test.ts (4 tests) 5ms
+ ✓ src/api/jfs.test.ts (2 tests) 3ms
+
+ Test Files  18 passed (18)
+      Tests  133 passed (133)
+   Start at  22:43:24
+   Duration  1.11s (transform 2.79s, setup 0ms, collect 5.37s, tests 137ms, environment 3ms, prepare 2.43s)
+
+VITEST_EXIT=0
+```
+
+- `npx tsc --noEmit`：退出码 **0**，无输出（clean）。
+- `npx vitest run`：退出码 **0**，**Test Files 18 passed (18)，Tests 133 passed (133)**，无失败、无 skipped，与 fix 前一致（无回归）。
+
+**诚实说明（与 Task 6 / Fix round 1 相同）：** 本仓库 context 层没有可执行的测试设施——vitest 运行在 node 环境、只 include `src/**/*.test.ts`，没有 jsdom / react-testing-library。因此本次改动由**类型检查 + 代码阅读**验证，**不是**运行 UI 验证；下面四条序列是基于 React 提交/依赖数组语义的精确追踪，不是被测试执行的运行时证据。未新增任何测试依赖。
+
+## 序列追踪与 effect 顺序
+
+关键前提：同一组件内 effect 按**声明顺序**在同一次 commit 后依次执行。封口 effect 声明在消费 effect（`:328`）之后（`:348`），故在一次提交内**消费先于封口**运行。封口 effect 只读 `currentMount`/`currentPath`（不依赖 `nodes`/`revealTick`），且不调用 setState（只写 ref），不会引发二次渲染，对消费结果无干扰。
+
+记目标为 `{mount: M, parent: P, key: K}`。
+
+**序列 1 — 跳到「非当前」的目标目录 → 不清空，消费命中。**
+1. `revealHit`：`pendingReveal={M,P,K}`，`revealTick++`，清 deepSearch，`navigateTo(M,P)` 与上述 state 在**同一批次**提交 → `currentMount=M`、`currentPath=P`。
+2. commit 后 effect 依次跑：消费 effect 因 `nodesOwnerRef` 仍指向旧目录（`owner != {M,P}`）而返回；封口 effect 读到 `currentMount/Path == M/P == reveal 的目标` → **不清空**。
+3. 目标目录 `refreshDirectory` 回填：`nodesOwnerRef={M,P}`、`setNodes(P 的 entries)`。
+4. `nodes` 变化触发消费 effect：两道守卫通过、`nodes.find(K)` 命中 → 清 `pendingReveal`、`setSelectedNode(hit)`。封口 effect 因 `currentMount/Path` 未变不重跑。**正确。**
+
+**序列 2 — 已经停在目标目录时点跳转 → 不清空，靠 `revealTick` 消费。**
+1. `revealHit`：`pendingReveal={M,P,K}`，`revealTick++`，`navigateTo(M,P)` 写入的是**原值** → React 对 `currentMount`/`currentPath` bail out，但 `revealTick` 已变，仍产生一次渲染/commit。
+2. 消费 effect（deps 含 `revealTick`）跑：`owner` 早已是 `{M,P}`、`currentMount/Path` 匹配、`nodes.find(K)` 命中 → 清 `pendingReveal`、选中。
+3. 封口 effect 的 deps（`currentMount`,`currentPath`）**未变化**，不重跑；即使因任何原因跑一次，也读到位置 == 目标 → **不清空**。**正确。**
+
+**序列 3 — 跳入 >1000 条目、`K` 不在本页 `nodes` 里 → 消费在 `!hit` 返回 → 不清空（有意）。**
+1. `revealHit` → `navigateTo(M,P)`，`currentMount/Path = M/P`。
+2. 消费 effect：`owner` 待目标请求回填后变为 `{M,P}`、位置守卫通过、`nodes.find(K)` **不命中** → 在 `!hit` 早退，`pendingReveal` **保留**。
+3. 封口 effect：位置 == 目标 → **不清空**（正是决策所要求的：分页截断下不能视为「目标不存在」）。
+4. 若此后目标页被重载或 `nodes` 变化，消费 effect 会再次尝试；若 `K` 始终不在本页，揭示保持上膛，等待序列 4 的离开或后续命中。**符合设计。**
+
+**序列 4 — 从序列 3 导航到任意其它目录 → 立即清空；之后手动返回不再误选。**
+1. 用户 `navigateTo(M2,P2)`（或 `navigateUp` 等，最终都落在 `setCurrentMount`/`setCurrentPath`）→ `currentMount/Path != M/P`。
+2. 封口 effect deps 变化 → 跑：位置 != 目标 → `pendingReveal.current = null`。**清空。**
+3. 稍后用户手动回到 `M/P`：`pendingReveal` 已为 null，消费 effect 第一行 `if (!reveal) return;` 直接退出 → **不会**自动选中 `K`。**悬挂消除。**
+
+**序列 3→4 的陈旧选中确认：** 封口把 `pendingReveal.current` 置 null 后，消费 effect 的 `const reveal = pendingReveal.current; if (!reveal) return;` 使任何**迟到**到达的目标目录响应（`owner` 变为 `{M,P}`、`nodes` 含 `K`）都无法选中任何东西——消费的唯一来源就是 `pendingReveal`，它已空。因此不会出现「离开后又被迟到响应选中」的陈旧选中。
+
+## 结论
+
+- 决策落地：不清空目标层的 miss，改为在离开目标目录时封口。
+- `npx tsc --noEmit` clean；`npx vitest run` 133/133，无回归。
+- 上下文层无 DOM 测试设施，验证 = 类型检查 + 阅读/追踪，非运行 UI。
+
+## 本轮变更文件
+
+- `web/src/context/FileStoreContext.tsx`（仅新增 `:343-353` 封口 effect）
+- `docs/superpowers/plans/2026-09-19-deep-search.md`（Task 6 Step 3 代码块 + blockquote 与实现对齐）
+- `docs/superpowers/specs/2026-09-19-deep-search-design.md`（Context 节第 170 行，悬挂规则改为限定生命周期）
+- `.superpowers/sdd/search-task-6-report.md`（本报告）
+
+## 本轮剩余关注
+
+原 Fix round 1 的 Concern 第 2 条（目标目录列表请求失败时揭示会保留）依旧：请求失败没有产生 `nodes`，封口 effect 也不会触发（位置没变），揭示会保留到用户离开该目录为止。因生命周期已被限定，风险进一步降低；仍未按个人判断改动。
+
