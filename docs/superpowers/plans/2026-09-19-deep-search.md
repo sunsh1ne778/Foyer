@@ -1703,6 +1703,8 @@ const EMPTY_DEEP_SEARCH: DeepSearchState = {
   const revealHit = useCallback(
     (hit: SearchHit) => {
       pendingReveal.current = { mount: hit.mount, parent: parentKey(hit.key), key: hit.key };
+      // 目标目录若已是当前目录，下面 navigateTo 不会改变 state；这个计数保证揭示 effect 仍会跑。
+      setRevealTick(t => t + 1);
       setDeepSearch(EMPTY_DEEP_SEARCH);
       navigateTo(hit.mount, parentKey(hit.key));
     },
@@ -1712,39 +1714,66 @@ const EMPTY_DEEP_SEARCH: DeepSearchState = {
 
 > `navigateTo` 是普通函数（非 `useCallback`），所以 `revealHit` 的依赖数组写 `[navigateTo]` 会在每轮渲染变化——这不影响正确性（只是 `useCallback` 不生效），保持与文件里其它 `useCallback` 一致的写法即可。
 
-- [ ] **Step 3: 在目录加载完成后消费 pendingReveal**
+- [ ] **Step 3: 用独立 effect 消费 pendingReveal**
 
-修改 `refreshDirectory`（约 194-199 行）。把
+`pendingReveal` **不能只在 `refreshDirectory` 里消费**：`revealHit` 调
+`navigateTo(hit.mount, parentKey(hit.key))`，若目标目录恰好就是用户当前所在目录，
+`setCurrentMount`/`setCurrentPath` 拿到的与现状相同，React 会 bail out 而不产生新渲染，
+于是驱动 `refreshDirectory` 的那个 effect（deps
+`[isAuthenticated, currentMount, currentPath, refreshDirectory]`）不会再跑——揭示永远不会被消费，
+点命中只会退出检索视图而什么都不选中。检索本身不改当前目录，所以「停在命中所在目录再检索」
+是很容易踩到的常规路径，不是边角。
 
+先在 Step 2 的两处基础上再加两样东西（`nodesOwnerRef` 记录产出当前 `nodes` 的那次请求属于哪个目录；
+`revealTick` 只在「已经身处目标目录」这条路线上强制一次渲染）：
+
+```ts
+  // 揭示消费用它判断 nodes 是否是「目标那一层」的条目——这保留了原来
+  // refreshDirectory 闭包内 mountName/currentPath 的守卫语义，避免在途的
+  // 旧目录（甚至别的挂载）请求用同名 key 把揭示提前吃掉。
+  const nodesOwnerRef = useRef<{ mount: string; path: string } | null>(null);
+  // 揭示计数器：目标目录已经是当前目录时 navigateTo 不改变 state（React 会 bail out），
+  // 靠它强制一次渲染，让揭示消费 effect 仍然被触发。
+  const [revealTick, setRevealTick] = useState(0);
 ```
+
+`revealHit` 里于 `setDeepSearch` 之前 `setRevealTick(t => t + 1);`
+（`setRevealTick` 是稳定的 state setter，`revealHit` 的依赖数组保持 `[navigateTo]` 不变）。
+
+`refreshDirectory` 里在 `setNodes(entries)` 之前记一行，既有的「保留仍然存在的选中」remap 原样保留：
+
+```ts
+      nodesOwnerRef.current = { mount: mountName, path: currentPath };
       setNodes(entries);
-      setSelectedNode(prev => {
-        if (!prev) return null;
-        const hit = entries.find(n => n.key === prev.key);
-        return hit || null;
-      });
 ```
 
-替换为（既有的「保留仍然存在的选中」remap 必须原样保留，reveal 在其后覆盖）：
+同一函数里 `if (!mountName) { setNodes([]); ... }` 的早退分支要加 `nodesOwnerRef.current = null;`。
 
-```
-      setNodes(entries);
-      setSelectedNode(prev => {
-        if (!prev) return null;
-        const hit = entries.find(n => n.key === prev.key);
-        return hit || null;
-      });
-      // 揭示（revealHit）只应在「目标所在的那一层」生效：在途的旧目录请求
-      // 也会走到这里，不带 mount/parent 校验就会把待揭示状态提前吃掉。
-      const reveal = pendingReveal.current;
-      if (reveal && reveal.mount === mountName && reveal.parent === currentPath) {
-        pendingReveal.current = null;
-        const hit = entries.find(n => n.key === reveal.key);
-        if (hit) setSelectedNode(hit);
-      }
+然后把揭示的唯一消费点放在 `navigateTo` 之后的独立 effect 里：
+
+```ts
+  // 揭示的唯一消费点。deps 同时覆盖两条路径：
+  // - 目标目录不是当前目录：navigateTo 改了路径，目录加载回填 nodes 后本 effect 命中；
+  // - 目标目录已经是当前目录：navigateTo 不产生新渲染，revealTick 强制本 effect 命中。
+  // 守卫用 nodesOwnerRef（产出 nodes 的那次请求的闭包值），在途的旧目录请求
+  // 无法用同名 key 提前消费；同时仍要求用户当前就停在目标目录。
+  useEffect(() => {
+    const reveal = pendingReveal.current;
+    if (!reveal) return;
+    const owner = nodesOwnerRef.current;
+    if (!owner || owner.mount !== reveal.mount || owner.path !== reveal.parent) return;
+    if (reveal.mount !== currentMount || reveal.parent !== currentPath) return;
+    const hit = nodes.find(n => n.key === reveal.key);
+    if (!hit) return;
+    pendingReveal.current = null;
+    setSelectedNode(hit);
+  }, [revealTick, nodes, currentMount, currentPath]);
 ```
 
-> 不需要给 `refreshDirectory` 加依赖：`pendingReveal` 是 ref，`setSelectedNode` 稳定，`mountName`/`currentPath` 已在 `useCallback` 的依赖数组里。
+> 两个守卫缺一不可：`nodesOwnerRef` 挡「在途的旧目录请求用同名 key 提前消费」，
+> `currentMount`/`currentPath` 挡「用户已经离开目标目录」。
+> `!hit` 时**故意不清空** `pendingReveal`：目标暂时不在（例如刚被删）时留待下次回到该目录再认，
+> 且 key 是完整挂载内路径，不可能选中别的文件。
 
 - [ ] **Step 4: 挂进 provider value**
 
@@ -1787,6 +1816,7 @@ const EMPTY_DEEP_SEARCH: DeepSearchState = {
 ```
     setSelectedNode(null);
     pendingReveal.current = null;
+    nodesOwnerRef.current = null;
     setDeepSearch(EMPTY_DEEP_SEARCH);
     pollTimers.current.forEach(t => clearInterval(t));
     pollTimers.current.clear();
