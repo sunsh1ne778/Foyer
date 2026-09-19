@@ -101,7 +101,28 @@ func NewHealthMux(cfg Config) http.Handler {
 			return
 		}
 		disk, derr := StatDisk(cfg.DataDisk)
-		writeJSON(w, http.StatusOK, BuildUsageResponse(res.Volume, disk, derr == nil, res.Summaries))
+		// 每个路径的分母来自它自己依赖的盘：现场 statfs，不缓存、不落库。
+		// 同一个来源盘只 statfs 一次（多个挂载可能同盘）。
+		mounts, _ := store.list()
+		byDest := poolPathFor(mounts)
+		pools := map[string]DiskSpace{}
+		seen := map[string]DiskSpace{}
+		for _, p := range paths {
+			src, ok := byDest[cleanVolumePath(p)]
+			if !ok {
+				continue
+			}
+			d, cached := seen[src]
+			if !cached {
+				var err error
+				if d, err = StatDisk(src); err != nil {
+					continue
+				}
+				seen[src] = d
+			}
+			pools[cleanVolumePath(p)] = d
+		}
+		writeJSON(w, http.StatusOK, BuildUsageResponse(res.Volume, disk, derr == nil, res.Summaries, pools))
 	})
 	mux.HandleFunc("/foyer/browse", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
