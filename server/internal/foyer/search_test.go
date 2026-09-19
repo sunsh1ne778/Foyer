@@ -1,6 +1,9 @@
 package foyer
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -99,5 +102,76 @@ func TestBuildSearchResponseNeverEmitsNullMatches(t *testing.T) {
 	// errors 刻意透传（含 nil）：它是 omitempty，让「干净」与「有失败」可区分。
 	if got.Errors != nil {
 		t.Fatalf("errors 应保持 nil: %+v", got.Errors)
+	}
+}
+
+func TestSearchRouteRejectsMissingQuery(t *testing.T) {
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true)}
+	mux := NewHealthMux(cfg)
+	for _, target := range []string{"/foyer/search", "/foyer/search?q=", "/foyer/search?q=%20%20"} {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, target, nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status %d: %s", target, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestSearchRouteRejectsNonGet(t *testing.T) {
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true)}
+	mux := NewHealthMux(cfg)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/foyer/search?q=raw", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status %d", rr.Code)
+	}
+	if allow := rr.Header().Get("Allow"); allow != "GET" {
+		t.Fatalf("Allow = %q, want GET", allow)
+	}
+}
+
+func TestSearchRouteReturnsMatches(t *testing.T) {
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true)}
+	mux := NewHealthMux(cfg)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/search?q=raw&path=/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var got SearchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.OK || got.Keyword != "raw" || got.Scanned != 42 || got.Truncated {
+		t.Fatalf("%+v", got)
+	}
+	if len(got.Matches) != 2 || got.Matches[0].Path != "/photos/raw" || got.Matches[1].Name != "a.dng" {
+		t.Fatalf("matches: %+v", got.Matches)
+	}
+	// 空 errors 必须序列化成「键缺席」，不是 null：前端据此区分干净与有失败。
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["errors"]; ok {
+		t.Fatalf("无错误时不应带 errors 键: %s", rr.Body.String())
+	}
+}
+
+// path 缺省必须能正常工作：前端固定从卷根遍历，一次覆盖所有挂载。
+func TestSearchRouteWorksWithoutPath(t *testing.T) {
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true)}
+	mux := NewHealthMux(cfg)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/search?q=raw", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var got SearchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.OK || got.Keyword != "raw" || len(got.Matches) != 2 {
+		t.Fatalf("%+v", got)
 	}
 }

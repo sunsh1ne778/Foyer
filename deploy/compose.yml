@@ -90,6 +90,8 @@ services:
       FOYER_MOUNTS_FILE: /var/lib/foyer/mounts.json
       # 物理数据盘路径：容器根即底层磁盘（rustfs 数据卷同一块盘）。
       FOYER_DATA_DISK_PATH: /
+      # 深度检索的命中上限。留空/0 = 不限（默认完整返回）；设成小值是安全阀。
+      FOYER_SEARCH_MAX_RESULTS: ${FOYER_SEARCH_MAX_RESULTS:-0}
       MINIO_ROOT_USER: foyerak
       MINIO_ROOT_PASSWORD: foyersecret
     volumes:

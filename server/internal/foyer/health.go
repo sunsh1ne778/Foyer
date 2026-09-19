@@ -124,6 +124,27 @@ func NewHealthMux(cfg Config) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, BuildUsageResponse(res.Volume, disk, derr == nil, res.Summaries, pools))
 	})
+	mux.HandleFunc("/foyer/search", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		keyword := strings.TrimSpace(r.URL.Query().Get("q"))
+		if keyword == "" {
+			http.Error(w, "q required", http.StatusBadRequest)
+			return
+		}
+		// path 缺省由 SearchArgs 收敛成 "/"：从卷根遍历一次即覆盖所有挂载，
+		// 天然避免嵌套挂载被重复遍历。
+		res, err := run.Search(cfg, r.URL.Query().Get("path"), keyword,
+			r.URL.Query().Get("case") == "1", cfg.SearchMaxResults)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, BuildSearchResponse(res))
+	})
 	mux.HandleFunc("/foyer/browse", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
