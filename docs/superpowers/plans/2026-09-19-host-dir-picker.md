@@ -197,11 +197,13 @@ func DetectHostDrives(base string) []string {
 		if c < 'a' || c > 'z' {
 			continue
 		}
-		out = append(out, strings.ToUpper(n)+`:\\`)
+		out = append(out, strings.ToUpper(n)+`:\`)
 	}
 	return out
 }
 ```
+
+> 注意盘符形式是 `G:\`（**一个**反斜杠）。改配置根之前的代码用的是 `` `:\\` ``（两个），那是不规范的历史写法。本任务顺带纠正为规范形式，与设计文档「`/mnt/g` ↔ `G:\`」一致；`/foyer/health` 的 `host_drives` 输出随之从 `G:\\` 变为 `G:\`，唯一消费方是前端默认值展示，无测试钉住旧值。
 
 - [ ] **Step 5: 改 health.go 调用点**
 
@@ -353,17 +355,96 @@ git commit -m "feat(foyer): 新增 HostPathFromContainer 反向映射（盘符�
 **Files:**
 - Create: `server/internal/foyer/browse.go`
 - Create: `server/internal/foyer/browse_test.go`
+- Modify: `server/internal/foyer/path.go`（给 `HostPathFromContainer` 加 `containerStyle` 归一化）
+- Modify: `server/internal/foyer/path_test.go`（加一条回归测试）
 - Modify: `server/internal/foyer/health.go`（在 `/foyer/stat` 路由之后插入）
 
 **Interfaces:**
 - Consumes: `MapHostPath`、`HostPathFromContainer`（Task 2）、`hostMountBase`、`underRoot`、`DetectHostDrives`（Task 1）、`writeJSON`（已在 `health.go`）
 - Produces:
+  - `containerStyle(p string) string`
   - `type BrowseEntry struct { Name, Path, Mtime string }`（json: `name` / `path` / `mtime,omitempty`）
   - `type BrowseResult struct { OK bool; Path, Parent string; Drives []string; Entries []BrowseEntry }`（json: `ok` / `path` / `parent` / `drives` / `entries`）
   - `Browse(cfg Config, hostPath string) (BrowseResult, error)`
   - 路由 `GET /foyer/browse?path=<宿主机路径>`；`path` 省略 = 盘符列表层级
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: 修 `HostPathFromContainer` 对无前导斜杠的 base 的兼容（带回归测试）**
+
+这一步是必需的，不是可选加固。本任务的测试夹具把 `HostMountBase` 设成 `t.TempDir()`（Windows 上形如 `C:/Users/.../mnt`，**没有前导斜杠**），而 Task 2 的实现是给输入补一个前导 `/` 再和 `base` 比较，两侧因此对不上。
+
+已实测确认（Windows）：
+
+```
+MapHostPath(G:\) = "C:/Users/x/AppData/Local/Temp/TestBrowse123/001/mnt/g"
+HostPathFromContainer 失败: container path .../mnt/g is not under .../mnt
+```
+
+后果是 `Browse` 在给 `res.Path` 赋值的那一步就返回错误，**全部 Browse 测试都会失败**。生产中 `HostMountBase` 恒为容器内 POSIX 路径（`/mnt`），所以这是配置健壮性问题；但 `HostMountBase` 可由 env 自定义，一个静默失配（browse 永远报错）比三行归一化更糟。
+
+在 `path.go` 里 `isASCIILetter` 之前插入：
+
+```go
+// containerStyle 把路径归一化成 "/"-开头的容器路径，用于比较两侧。
+// HostMountBase 可由 env 配置；生产恒为 "/mnt"，但 Windows 上若配成
+// "C:/mnt" 这类无前导斜杠的值，只有两侧都归一化后才能正确比较前缀。
+// 仅用于比较与取相对片段，不用于访问文件系统。
+func containerStyle(p string) string {
+	p = strings.ReplaceAll(filepath.ToSlash(p), "\\", "/")
+	if p == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return path.Clean(p)
+}
+```
+
+然后把 `HostPathFromContainer` 的这两行：
+
+```go
+	p := path.Clean("/" + strings.TrimPrefix(filepath.ToSlash(containerPath), "/"))
+	base := hostMountBase(cfg)
+```
+
+替换为：
+
+```go
+	p := containerStyle(containerPath)
+	base := containerStyle(hostMountBase(cfg))
+```
+
+其余逻辑不动（`underRoot` 比较、`rest` 取法、盘符校验都基于已归一化的 `p`/`base`，语义不变）。
+
+在 `path_test.go` 追加回归测试：
+
+```go
+// HostMountBase 没有前导斜杠时（Windows 上 env 配成 C:/mnt 这类），
+// 反向映射必须仍能工作——Browse 的测试夹具正是这种形状。
+func TestHostPathFromContainerWithoutLeadingSlashBase(t *testing.T) {
+	cfg := Config{HostMountBase: "C:/data/mnt"}
+	got, err := HostPathFromContainer(cfg, "C:/data/mnt/g/20260619")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `G:\20260619` {
+		t.Fatalf("got %q", got)
+	}
+	// 绑定根自身仍必须被拒。
+	if got, err := HostPathFromContainer(cfg, "C:/data/mnt"); err == nil {
+		t.Fatalf("bind root should fail, got %q", got)
+	}
+}
+```
+
+- [ ] **Step 2: 跑回归测试确认通过**
+
+Run: `cd server && go test ./internal/foyer/ -run 'TestHostPathFromContainer' -v`
+Expected: PASS（含既有的 `TestHostPathFromContainer`、`TestHostPathRoundTrip`，且新回归测试通过）
+
+> 若跳过 Step 1，本任务后面的 Browse 测试会在 `HostPathFromContainer` 处全部失败——那不是测试写错，是缺了归一化。
+
+- [ ] **Step 3: 写 Browse 的失败测试**
 
 创建 `server/internal/foyer/browse_test.go`：
 
@@ -481,7 +562,9 @@ func TestBrowseSkipsSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Windows 上目录 symlink 的 IsDir() 是 true，靠显式的 ModeSymlink 检查拦下。
+	// Go ≥1.23 已让目录 symlink 与 junction 在 ReadDir 里报 IsDir()==false
+	// （junction 报 ModeIrregular），所以 !IsDir() 本身就会把它滤掉；
+	// ModeSymlink 是纵深防御，不要用"Windows 上 IsDir() 为 true"这个错误理由解释它。
 	if len(res.Entries) != 0 {
 		t.Fatalf("symlink must be skipped: %+v", res.Entries)
 	}
@@ -565,12 +648,12 @@ func TestBrowseRoute(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 4: 跑测试确认失败**
 
 Run: `cd server && go test ./internal/foyer/ -run 'TestBrowse' -v`
 Expected: 编译失败 `undefined: Browse`
 
-- [ ] **Step 3: 实现 browse.go**
+- [ ] **Step 5: 实现 browse.go**
 
 创建 `server/internal/foyer/browse.go`：
 
@@ -626,7 +709,8 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 
 	// 越界防护不是可选的加固：MapHostPath 对 "/etc" 这类绝对路径会原样放行
 	// （HostData 为空时走 `if strings.HasPrefix(s, "/")` 分支），只能在这里拦。
-	if !underRoot(container, base) {
+	// 两侧都过 containerStyle，与 HostPathFromContainer 的归一化保持一致。
+	if !underRoot(containerStyle(container), containerStyle(base)) {
 		return BrowseResult{}, fmt.Errorf("path is outside the allowed root (%s)", base)
 	}
 
@@ -642,6 +726,26 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 	}
 	if !fi.IsDir() {
 		return BrowseResult{}, fmt.Errorf("not a directory: %s", hostPath)
+	}
+
+	// 上面两步都不够：underRoot 只是对字符串做词法前缀比较，而 os.Lstat 只在
+	// **最后一段**是链接时才拒绝。中间某段若是指向根外的符号链接/junction，
+	// Lstat 会跟随它看到普通目录，检查全过，ReadDir 就读到盘符之外了。
+	// 必须解析真实路径后再验一次包含性。EvalSymlinks 报错时直接失败关闭
+	// （Windows 上 junction 就是走这条错误分支被拒的）。
+	realBase, err := filepath.EvalSymlinks(filepath.FromSlash(base))
+	if err != nil {
+		return BrowseResult{}, err
+	}
+	realContainer, err := filepath.EvalSymlinks(filepath.FromSlash(container))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return BrowseResult{}, fmt.Errorf("no such directory: %s", hostPath)
+		}
+		return BrowseResult{}, err
+	}
+	if !underRoot(containerStyle(realContainer), containerStyle(realBase)) {
+		return BrowseResult{}, fmt.Errorf("path escapes the allowed root (%s)", base)
 	}
 
 	res.Path, err = HostPathFromContainer(cfg, container)
@@ -660,8 +764,11 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 	}
 	for _, e := range ents {
 		// 只列目录；符号链接一律跳过——它可能指向允许根之外，跟随会让
-		// "限定在已绑定盘符内"的约束失效。Windows 上目录 symlink 的 IsDir()
-		// 仍为 true，所以 ModeSymlink 检查必须显式写出来。
+		// "限定在已绑定盘符内"的约束失效。Go ≥1.23 已经让目录 symlink 与
+		// junction 在 ReadDir 里报 IsDir()==false（junction 报 ModeIrregular、
+		// 不报 ModeSymlink），所以真正的过滤其实是 !e.IsDir()；ModeSymlink
+		// 检查作为纵深防御保留，不要用"Windows 上 IsDir() 为 true"这个错误
+		// 理由去解释它。
 		if !e.IsDir() || e.Type()&os.ModeSymlink != 0 {
 			continue
 		}
@@ -683,7 +790,7 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 }
 ```
 
-- [ ] **Step 4: 加路由**
+- [ ] **Step 6: 加路由**
 
 在 `server/internal/foyer/health.go` 的 `/foyer/stat` handler 之后、`/foyer/mounts` 之前插入：
 
@@ -702,15 +809,15 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 	})
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 7: 跑测试确认通过**
 
 Run: `cd server && go test ./internal/foyer/ -v`
 Expected: 全部 PASS（含之前的 `TestHealthJSONAndRoute`、`TestImportDryRunRouteSkipsMountRecord`）
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add server/internal/foyer/browse.go server/internal/foyer/browse_test.go server/internal/foyer/health.go
+git add server/internal/foyer/browse.go server/internal/foyer/browse_test.go server/internal/foyer/path.go server/internal/foyer/path_test.go server/internal/foyer/health.go
 git commit -m "feat(foyer): 新增 GET /foyer/browse 列宿主机子目录"
 ```
 
@@ -939,6 +1046,8 @@ git commit -m "feat(web): 新增 foyerBrowse 与宿主机路径面包屑纯函�
   `{ open: boolean; initialPath?: string; onSelect: (hostPath: string) => void; onClose: () => void }`
 
 > 该组件不做单测：`web/vite.config.ts` 的 `test.include` 只匹配 `src/**/*.test.ts` 且 `environment: 'node'`，没有 DOM。可测逻辑已下沉到 Task 4 的纯函数。
+
+> 实施后修正（评审提出）：下面这段组件骨架缺少本任务约束自身要求的 Escape 关闭、遮罩关闭、卸载/竞态安全，实现时已补齐，相关形态见 commit `05a3c7e`。另外 `load` 必须以**三态** `'ok' | 'failed' | 'stale'` 返回，不能返回 bool：被更新请求取代的失败若与真实失败混同，`initialPath` 回退会在用户已点击盘符/面包屑后把它静默丢弃，并在卸载后继续 setState 与发请求（修复见 commit `4d2e844`）。
 
 - [ ] **Step 1: 实现组件**
 
