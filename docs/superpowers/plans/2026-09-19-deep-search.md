@@ -1346,7 +1346,10 @@ describe('mountRoot', () => {
   });
 
   it('falls back to /name for a mount without dest', () => {
-    expect(mountRoot({ id: 'x', name: 'x', type: 'local' })).toBe('/x');
+    // 必须绑成 ApiMount 再传：直接写对象字面量会触发多余属性检查（TS2353），
+    // 因为 mountRoot 的形参只声明了 name/spec。以下常量在前面已定义。
+    const noDest: ApiMount = { id: 'x', name: 'x', type: 'local' };
+    expect(mountRoot(noDest)).toBe('/x');
   });
 });
 
