@@ -116,3 +116,17 @@ export interface SearchHit {
   /** 卷内绝对路径，仅供展示与排查。 */
   volumePath: string;
 }
+
+/** 深度检索视图状态。active 为假时结果视图不渲染。 */
+export interface DeepSearchState {
+  active: boolean;
+  keyword: string;
+  loading: boolean;
+  /** 访问过的真实条目数，用于「已扫描 N 项」。 */
+  scanned: number;
+  /** 命中数撞上了服务端上限，结果不完整。 */
+  truncated: boolean;
+  error: string;
+  hits: SearchHit[];
+  page: number;
+}

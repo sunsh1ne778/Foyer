@@ -9,6 +9,7 @@ import React, {
 import * as api from '../api/client';
 import type { FoyerImportResult } from '../api/jfs';
 import { mapJob, mapListEntry, mapMount } from '../api/mappers';
+import { attributeMatches, parentKey } from '../api/search';
 import {
   Mount,
   FSNode,
@@ -16,6 +17,8 @@ import {
   WriteSession,
   SystemClusterInfo,
   JobType,
+  DeepSearchState,
+  SearchHit,
 } from '../types';
 import { parseRef } from '../utils/formatters';
 
@@ -61,6 +64,12 @@ interface FileStoreContextType {
   selectAllKeys: (keys: string[]) => void;
   clearSelection: () => void;
 
+  deepSearch: DeepSearchState;
+  runDeepSearch: (keyword: string) => Promise<void>;
+  exitDeepSearch: () => void;
+  setDeepSearchPage: (page: number) => void;
+  revealHit: (hit: SearchHit) => void;
+
   isUploadOpen: boolean;
   setIsUploadOpen: (open: boolean) => void;
   isNewFolderOpen: boolean;
@@ -95,6 +104,17 @@ interface FileStoreContextType {
   retryJob: (jobId: string) => void;
 }
 
+const EMPTY_DEEP_SEARCH: DeepSearchState = {
+  active: false,
+  keyword: '',
+  loading: false,
+  scanned: 0,
+  truncated: false,
+  error: '',
+  hits: [],
+  page: 1,
+};
+
 const FileStoreContext = createContext<FileStoreContextType | null>(null);
 
 export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -127,6 +147,10 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [selectedNode, setSelectedNode] = useState<FSNode | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [deepSearch, setDeepSearch] = useState<DeepSearchState>(EMPTY_DEEP_SEARCH);
+  // 待揭示的目标：置上后由下一次「匹配到那个目录」的目录加载消费并选中该行。
+  // 必须带 mount/parent 一起记：否则在途的旧目录请求会把关键词提前吃掉。
+  const pendingReveal = useRef<{ mount: string; parent: string; key: string } | null>(null);
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
@@ -197,6 +221,14 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const hit = entries.find(n => n.key === prev.key);
         return hit || null;
       });
+      // 揭示（revealHit）只应在「目标所在的那一层」生效：在途的旧目录请求
+      // 也会走到这里，不带 mount/parent 校验就会把待揭示状态提前吃掉。
+      const reveal = pendingReveal.current;
+      if (reveal && reveal.mount === mountName && reveal.parent === currentPath) {
+        pendingReveal.current = null;
+        const hit = entries.find(n => n.key === reveal.key);
+        if (hit) setSelectedNode(hit);
+      }
     } catch (err) {
       reportError(err);
     } finally {
@@ -314,6 +346,8 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setWriteSessions([]);
     setCurrentMount('');
     setSelectedNode(null);
+    pendingReveal.current = null;
+    setDeepSearch(EMPTY_DEEP_SEARCH);
     pollTimers.current.forEach(t => clearInterval(t));
     pollTimers.current.clear();
   };
@@ -354,6 +388,52 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const selectAllKeys = (keys: string[]) => setSelectedKeys(new Set(keys));
   const clearSelection = () => setSelectedKeys(new Set());
+
+  const runDeepSearch = useCallback(async (keyword: string) => {
+    const kw = keyword.trim();
+    if (!kw) return;
+    setDeepSearch({ ...EMPTY_DEEP_SEARCH, active: true, keyword: kw, loading: true });
+    try {
+      // 固定从卷根遍历：所有挂载都是卷内子树，一次请求即全覆盖。
+      const res = await api.searchFiles(kw, '/');
+      setDeepSearch({
+        active: true,
+        keyword: res.keyword || kw,
+        loading: false,
+        scanned: res.scanned,
+        truncated: res.truncated,
+        error: '',
+        hits: attributeMatches(mountsRef.current, res.matches),
+        page: 1,
+      });
+    } catch (err) {
+      // 检索失败只落在结果视图里，不弹全局错误：它不阻塞其它任何操作。
+      setDeepSearch({
+        ...EMPTY_DEEP_SEARCH,
+        active: true,
+        keyword: kw,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, []);
+
+  const exitDeepSearch = useCallback(() => {
+    pendingReveal.current = null;
+    setDeepSearch(EMPTY_DEEP_SEARCH);
+  }, []);
+
+  const setDeepSearchPage = useCallback((page: number) => {
+    setDeepSearch(prev => ({ ...prev, page }));
+  }, []);
+
+  const revealHit = useCallback(
+    (hit: SearchHit) => {
+      pendingReveal.current = { mount: hit.mount, parent: parentKey(hit.key), key: hit.key };
+      setDeepSearch(EMPTY_DEEP_SEARCH);
+      navigateTo(hit.mount, parentKey(hit.key));
+    },
+    [navigateTo]
+  );
 
   const createFolder = async (name: string): Promise<boolean> => {
     if (!name.trim() || !currentMount) return false;
@@ -596,6 +676,11 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         toggleSelectKey,
         selectAllKeys,
         clearSelection,
+        deepSearch,
+        runDeepSearch,
+        exitDeepSearch,
+        setDeepSearchPage,
+        revealHit,
         isUploadOpen,
         setIsUploadOpen,
         isNewFolderOpen,
