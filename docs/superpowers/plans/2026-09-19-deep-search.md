@@ -1304,7 +1304,7 @@ git commit -m "feat(web): fetch deep search results from /foyer/search"
 **Files:**
 - Create: `web/src/api/search.ts`
 - Create: `web/src/api/search.test.ts`
-- Modify: `web/src/types.ts`（新增 `SearchHit` 与 `DeepSearchState`）
+- Modify: `web/src/types.ts`（只新增 `SearchHit`；`DeepSearchState` 是 context 的视图状态，归 Task 6）
 
 **Interfaces:**
 - Consumes: `web/src/api/mounts.ts` 的 `mountVolumePath`；`web/src/api/jfs.ts` 的 `mtimeISO`、`JFS_MOUNT`、`FoyerSearchMatch`；`web/src/api/client.ts` 的 `ApiMount`；`web/src/types.ts` 的 `SearchHit`。
@@ -1471,21 +1471,9 @@ export interface SearchHit {
   /** 卷内绝对路径，仅供展示与排查。 */
   volumePath: string;
 }
-
-/** 深度检索视图状态。active 为假时结果视图不渲染。 */
-export interface DeepSearchState {
-  active: boolean;
-  keyword: string;
-  loading: boolean;
-  /** 访问过的真实条目数，用于「已扫描 N 项」。 */
-  scanned: number;
-  /** 命中数撞上了服务端上限，结果不完整。 */
-  truncated: boolean;
-  error: string;
-  hits: SearchHit[];
-  page: number;
-}
 ```
+
+> `DeepSearchState`（深度检索视图状态）**不在本任务**：它是 context 的视图状态，与 context 同层，定义见 Task 6 Step 1。本任务只加 `SearchHit`。
 
 - [ ] **Step 4: 写最小实现**
 
@@ -1600,14 +1588,33 @@ git commit -m "feat(web): attribute search hits to mounts and paginate them"
 
 **Files:**
 - Modify: `web/src/context/FileStoreContext.tsx`
+- Modify: `web/src/types.ts`（新增 `DeepSearchState`）
 
 **Interfaces:**
-- Consumes: Task 4 的 `api.searchFiles`；Task 5 的 `attributeMatches`、`parentKey`、`SearchHit`、`DeepSearchState`。
+- Consumes: Task 4 的 `api.searchFiles`；Task 5 的 `attributeMatches`、`parentKey`、`SearchHit`；`web/src/types.ts` 的 `DeepSearchState`（本任务自己加）。
 - Produces: context 上的 `deepSearch: DeepSearchState`、`runDeepSearch(keyword: string): Promise<void>`、`exitDeepSearch(): void`、`setDeepSearchPage(page: number): void`、`revealHit(hit: SearchHit): void`。
 
 - [ ] **Step 1: 加状态类型与初始值**
 
-修改 `web/src/context/FileStoreContext.tsx`。
+先在 `web/src/types.ts` 末尾追加（Task 5 刻意没加它，因为它是 context 的视图状态）：
+
+```ts
+/** 深度检索视图状态。active 为假时结果视图不渲染。 */
+export interface DeepSearchState {
+  active: boolean;
+  keyword: string;
+  loading: boolean;
+  /** 访问过的真实条目数，用于「已扫描 N 项」。 */
+  scanned: number;
+  /** 命中数撞上了服务端上限，结果不完整。 */
+  truncated: boolean;
+  error: string;
+  hits: SearchHit[];
+  page: number;
+}
+```
+
+然后修改 `web/src/context/FileStoreContext.tsx`。
 
 import 段加：
 
