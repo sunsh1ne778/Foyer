@@ -82,6 +82,18 @@ func NewHealthMux(cfg Config) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stats": res})
 	})
+	mux.HandleFunc("/foyer/browse", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		res, err := Browse(cfg, r.URL.Query().Get("path"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("/foyer/mounts", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)

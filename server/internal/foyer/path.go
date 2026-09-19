@@ -133,6 +133,21 @@ func DetectHostDrives(base string) []string {
 	return out
 }
 
+// containerStyle 把路径归一化成 "/"-开头的容器路径，用于比较两侧。
+// HostMountBase 可由 env 配置；生产恒为 "/mnt"，但 Windows 上若配成
+// "C:/mnt" 这类无前导斜杠的值，只有两侧都归一化后才能正确比较前缀。
+// 仅用于比较与取相对片段，不用于访问文件系统。
+func containerStyle(p string) string {
+	p = strings.ReplaceAll(filepath.ToSlash(p), "\\", "/")
+	if p == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return path.Clean(p)
+}
+
 func isASCIILetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
@@ -150,8 +165,8 @@ func toBackslash(p string) string {
 // 反向映射——它只接非盘符路径，且被盘符分支抢先，硬映射会产出回喂 MapHostPath
 // 后落到 /mnt 的静默错误值。
 func HostPathFromContainer(cfg Config, containerPath string) (string, error) {
-	p := path.Clean("/" + strings.TrimPrefix(filepath.ToSlash(containerPath), "/"))
-	base := hostMountBase(cfg)
+	p := containerStyle(containerPath)
+	base := containerStyle(hostMountBase(cfg))
 	if !underRoot(p, base) {
 		return "", fmt.Errorf("container path %s is not under %s", containerPath, base)
 	}

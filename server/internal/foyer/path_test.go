@@ -121,6 +121,23 @@ func TestHostPathFromContainer(t *testing.T) {
 	}
 }
 
+// HostMountBase 没有前导斜杠时（Windows 上 env 配成 C:/mnt 这类），
+// 反向映射必须仍能工作——Browse 的测试夹具正是这种形状。
+func TestHostPathFromContainerWithoutLeadingSlashBase(t *testing.T) {
+	cfg := Config{HostMountBase: "C:/data/mnt"}
+	got, err := HostPathFromContainer(cfg, "C:/data/mnt/g/20260619")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `G:\20260619` {
+		t.Fatalf("got %q", got)
+	}
+	// 绑定根自身仍必须被拒。
+	if got, err := HostPathFromContainer(cfg, "C:/data/mnt"); err == nil {
+		t.Fatalf("bind root should fail, got %q", got)
+	}
+}
+
 // 回填给前端的路径必须能被 MapHostPath 原样还原，否则 resync 会落到别的目录。
 func TestHostPathRoundTrip(t *testing.T) {
 	cfg := Config{}
