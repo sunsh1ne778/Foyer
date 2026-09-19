@@ -14,6 +14,7 @@ import {
 import { useFileStore } from '../context/FileStoreContext';
 import { DriverType, DriverCaps } from '../types';
 import { foyerHealth } from '../api/jfs';
+import { foyerPickHostDir } from '../api/hostDir';
 import { DirectoryPicker } from './DirectoryPicker';
 
 export const NewMountModal: React.FC = () => {
@@ -25,6 +26,7 @@ export const NewMountModal: React.FC = () => {
   const [ingestMode, setIngestMode] = useState<'metadata' | 'copy' | 'empty'>('metadata');
   const [hostHint, setHostHint] = useState<{ host_data?: string; host_mount?: string; host_drives?: string[] }>({});
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
 
   // S3 / MinIO spec
   const [endpoint, setEndpoint] = useState('https://s3.us-west-2.amazonaws.com');
@@ -438,17 +440,34 @@ export const NewMountModal: React.FC = () => {
                   />
                   <button
                     type="button"
-                    onClick={() => setIsPickerOpen(true)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 font-medium shrink-0"
+                    disabled={isPicking}
+                    onClick={async () => {
+                      // 先试宿主机原生对话框：它能弹且拿到绝对路径（含网络位置、
+                      // 收藏夹，比网页内选择器好用）。弹不了才退回网页内选择器。
+                      setIsPicking(true);
+                      try {
+                        const picked = await foyerPickHostDir();
+                        if (picked.status === 'picked') {
+                          setLocalRoot(picked.path);
+                          setPreview(null);
+                          return;
+                        }
+                        if (picked.status === 'unavailable') setIsPickerOpen(true);
+                        // cancelled：用户自己关掉了框，什么都不做。
+                      } finally {
+                        setIsPicking(false);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 font-medium shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <FolderOpen className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>浏览…</span>
+                    <span>{isPicking ? '选择中…' : '浏览…'}</span>
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  填本机绝对路径，或点「浏览…」从已绑定盘符里逐级选。启动时会把本机已有盘符绑进容器
+                  填本机绝对路径，或点「浏览…」弹出本机目录选择框（本机弹不出时改为在网页内从已绑定盘符逐级选）
                   {hostHint.host_drives && hostHint.host_drives.length
-                    ? `（当前：${hostHint.host_drives.join(' ')}）`
+                    ? `（当前盘符：${hostHint.host_drives.join(' ')}）`
                     : '；若列表为空请用 scripts/run-foyer.ps1 重建'}
                   。
                 </p>
