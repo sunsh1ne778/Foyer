@@ -89,9 +89,11 @@ GET /foyer/browse?path=G:\20260619\#整理完成
 `MapHostPath` 对 `/etc/passwd` 这类输入会**原样放行**（`cfg.HostData` 为空且输入以 `/` 开头时直接 `path.Clean` 返回），所以只靠 `MapHostPath` 拦不住。`Browse` 必须在读目录前自己校验：
 
 1. `MapHostPath(cfg, path)` 得到容器路径。
-2. 容器路径必须落在**允许根**之内：`cfg.HostMountBase`（默认 `/mnt`）或 `cfg.HostMount`（默认 `/host`）。否则 400。
+2. 容器路径必须落在**允许根**之内：`cfg.HostMountBase`（默认 `/mnt`）。否则 400。
 3. 对目标做 `os.Lstat`，是符号链接则 400（避免通过链接跳出允许根）。
 4. `path.Clean` 已折叠 `..`，`/mnt/g/../../etc` 会变成 `/etc` 并在第 2 步被拒。
+
+> **为什么允许根只有一个。** `MapHostPath` 的盘符分支写在 `FOYER_HOST_DATA` 分支之前，所以 `E:\photos\raw` 一律映射到 `/mnt/e/photos/raw`——`/host` 那套只接非盘符路径（如 UNC），在选择器里根本不会出现。硬要支持它就得为 `/host` 单写一条反向映射，而那条反向映射产出的路径回喂 `MapHostPath` 会落到 `/mnt/...`，是个静默错误。因此选择器只支持**盘符绑定**；用户给 `/host` 下的路径会收到明确的 400，而不是拿到错误的目录列表。
 
 ### 错误
 
@@ -102,21 +104,22 @@ GET /foyer/browse?path=G:\20260619\#整理完成
 | 盘符未绑定 | `drive X: is not mounted into the container; run scripts/run-foyer.ps1 to rebind` |
 | 路径不存在 | `no such directory: G:\nope` |
 | 目标是文件 | `not a directory: G:\a.txt` |
-| 越界 | `path is outside the allowed roots (/mnt, /host)` |
+| 越界 | `path is outside the allowed roots (/mnt)` |
 | 无权限 | 透传 `os` 的错误文本 |
 
 ## 后端：反向映射 `HostPathFromContainer`
 
-`MapHostPath` 的逆运算，只覆盖受支持的两类根：
+`MapHostPath` 盘符分支的逆运算，只覆盖盘符绑定：
 
 | 容器路径 | 结果 |
 |---|---|
 | `/mnt/g` | `G:\` |
 | `/mnt/g/20260619/#整理完成` | `G:\20260619\#整理完成` |
-| `<cfg.HostMount>/x/y` | `<cfg.HostData>\x\y` |
+| `/mnt/d/photos/raw` | `D:\photos\raw` |
+| `/mnt`（绑定根自身） | error |
 | 其他 | error |
 
-要求：`HostPathFromContainer(MapHostPath(p))` 对合法盘符路径是恒等（除尾斜杠规范化），这是回填值能被 `spec.root` 接受、并在 resync 时被 `MapHostPath` 还原的前提。必须有表驱动测试覆盖 `#`、中文、空格。
+要求：`HostPathFromContainer(MapHostPath(p))` 对**盘符形式**的 `p` 是恒等（除尾斜杠规范化），这是回填值能被 `spec.root` 接受、并在 resync 时被 `MapHostPath` 还原的前提。必须有表驱动测试覆盖 `#`、中文、空格。
 
 ## 后端：可测试性改造
 
