@@ -441,3 +441,43 @@ export async function foyerBrowse(path?: string): Promise<FoyerBrowseResult> {
   };
 }
 
+export type FoyerUsageVolume = {
+  capacity: number;
+  capacity_set: boolean;
+  used: number;
+  used_inodes: number;
+  disk_total: number;
+  disk_used: number;
+  disk_free: number;
+};
+
+export type FoyerUsageSummary = {
+  path: string;
+  error?: string;
+  size: number;
+  length: number;
+  files: number;
+  dirs: number;
+  inodes: number;
+};
+
+export type FoyerUsage = {
+  volume: FoyerUsageVolume;
+  summaries: FoyerUsageSummary[];
+};
+
+/**
+ * 读卷与各挂载子树的真实用量。一次请求带上全部路径：控制面要为每个 `juicefs usage`
+ * 起一个进程，逐个请求会把进程启动开销乘上去。
+ *
+ * 用 URLSearchParams 拼 query：卷内路径可能含 `#`/空格/CJK（如
+ * `/av_20260619` 的来源目录名），手工拼串会被下游读成 fragment。
+ */
+export async function foyerUsage(paths: string[] = []): Promise<FoyerUsage> {
+  const qs = new URLSearchParams();
+  for (const p of paths) qs.append('path', p);
+  const q = qs.toString();
+  const res = await fetch(`/foyer/usage${q ? `?${q}` : ''}`);
+  if (!res.ok) throw new ApiError((await res.text()) || '读取用量失败', res.status);
+  return (await res.json()) as FoyerUsage;
+}

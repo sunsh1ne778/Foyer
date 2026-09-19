@@ -37,6 +37,7 @@ export function mapMount(raw: api.ApiMount): Mount {
     caps: capsForDriver(type),
     created_at: raw.created_at || new Date().toISOString(),
     updated_at: raw.updated_at || new Date().toISOString(),
+    stats: raw.stats,
   };
 }
 

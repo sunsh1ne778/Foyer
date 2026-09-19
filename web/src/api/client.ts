@@ -1,6 +1,6 @@
 export { ApiError } from './errors';
 import { ApiError } from './errors';
-import { mergeMounts } from './mounts';
+import { applyUsage, mergeMounts, mountVolumePath } from './mounts';
 import * as jfs from './jfs';
 
 export function getToken(): string {
@@ -46,6 +46,13 @@ export async function health(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
+export type ApiMountStats = {
+  total_bytes: number;
+  node_count: number;
+  /** 进度条分母：配额优先，否则物理数据盘总量；0 表示拿不到。 */
+  capacity_bytes: number;
+};
+
 export type ApiMount = {
   id: string;
   name: string;
@@ -55,6 +62,7 @@ export type ApiMount = {
   last_error?: string;
   created_at?: string;
   updated_at?: string;
+  stats?: ApiMountStats;
 };
 
 export async function listMounts(): Promise<{ mounts: ApiMount[] }> {
@@ -65,7 +73,15 @@ export async function listMounts(): Promise<{ mounts: ApiMount[] }> {
   } catch {
     /* foyer 目录暂时不可用时仍暴露卷挂载 */
   }
-  return { mounts: mergeMounts(extra) };
+  const merged = mergeMounts(extra);
+  // 真实用量是加分项：控制面读不到时保留挂载列表，stats 缺席，UI 不画进度条。
+  try {
+    const paths = merged.filter(m => m.name !== jfs.JFS_MOUNT).map(mountVolumePath);
+    applyUsage(merged, await jfs.foyerUsage(paths));
+  } catch {
+    /* ignore */
+  }
+  return { mounts: merged };
 }
 
 export async function createMount(body: {
