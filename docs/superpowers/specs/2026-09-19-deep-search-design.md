@@ -149,7 +149,7 @@ GET /foyer/search?q=%23整理&path=/av_20260619
 
 ### `web/src/api/search.ts`（纯函数）
 
-- `mountRoot(m)`：卷挂载（`name === JFS_MOUNT`，或 `spec.dest` 缺失）→ `/`；否则 `mountVolumePath(m)`。
+- `mountRoot(m)`：卷挂载（`name === JFS_MOUNT`）→ `/`；否则 `mountVolumePath(m)`（`spec.dest` 优先、退化到 `/name`）。
   - 注意：卷挂载的 `spec` 里没有 `dest`，直接套 `mountVolumePath` 会得到 `/foyer`（错误）。必须显式把卷挂载视作 `/`。
 - `matchesDest(path, dest)`：段边界对齐的前缀判断——`path === dest` 或 `path.startsWith(dest + '/')`；`dest === '/'` 时恒真。
 - `attributeMatches(mounts, matches): SearchHit[]`：
