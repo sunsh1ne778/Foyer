@@ -171,6 +171,8 @@ export const FileExplorer: React.FC = () => {
   // Drag & drop handlers
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    // 结果视图下不接受拖放，连高亮都不该出现：它承诺了一个不会发生的上传。
+    if (deepSearch.active) return;
     setIsDragging(true);
   };
 
