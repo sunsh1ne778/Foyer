@@ -11,6 +11,12 @@ type Props = {
   onClose: () => void;
 };
 
+/**
+ * load 的三态结果。必须区分「真的失败」与「被更新的请求取代 / 组件已卸载」：
+ * 前者才该触发盘符列表回退，后者回退会吞掉用户点击、或对已卸载组件继续发请求。
+ */
+type LoadResult = 'ok' | 'failed' | 'stale';
+
 export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, onClose }) => {
   const [path, setPath] = useState('');
   const [data, setData] = useState<FoyerBrowseResult | null>(null);
@@ -28,20 +34,22 @@ export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, 
     };
   }, []);
 
-  const load = useCallback(async (target: string): Promise<boolean> => {
+  const load = useCallback(async (target: string): Promise<LoadResult> => {
+    // 卸载后连请求都不该发：这里在执行任何 setState 之前就退出。
+    if (!aliveRef.current) return 'stale';
     const req = ++reqRef.current;
     setLoading(true);
     setError('');
     try {
       const res = await foyerBrowse(target);
-      if (!aliveRef.current || req !== reqRef.current) return false;
+      if (!aliveRef.current || req !== reqRef.current) return 'stale';
       setData(res);
       setPath(res.path);
-      return true;
+      return 'ok';
     } catch (err) {
-      if (!aliveRef.current || req !== reqRef.current) return false;
+      if (!aliveRef.current || req !== reqRef.current) return 'stale';
       setError(err instanceof Error ? err.message : '读取目录失败');
-      return false;
+      return 'failed';
     } finally {
       if (aliveRef.current && req === reqRef.current) setLoading(false);
     }
@@ -49,15 +57,17 @@ export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, 
 
   useEffect(() => {
     if (!open) return;
+    let active = true;
     const start = (initialPath || '').trim();
-    if (!start) {
-      void load('');
-      return;
-    }
-    // 输入框里的路径可能已失效或越界；退回盘符列表，而不是卡在错误上。
     void (async () => {
-      if (!(await load(start))) await load('');
+      const first = await load(start);
+      // 只有「真的失败」才回退到盘符列表。'stale'（被取代或已卸载）不回退：
+      // 否则会 supersede 掉用户刚点的目录，甚至在卸载后再发一次请求。
+      if (start && first === 'failed' && active) await load('');
     })();
+    return () => {
+      active = false;
+    };
   }, [open, initialPath, load]);
 
   // Esc 关闭；与背景点击一致。
