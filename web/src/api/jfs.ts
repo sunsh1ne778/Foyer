@@ -386,3 +386,44 @@ export async function foyerResyncMount(id: string): Promise<FoyerImportResult> {
   return data.result;
 }
 
+export type FoyerBrowseEntry = {
+  name: string;
+  path: string;
+  mtime?: string;
+};
+
+export type FoyerBrowseResult = {
+  ok: boolean;
+  path: string;
+  parent: string;
+  drives: string[];
+  entries: FoyerBrowseEntry[];
+};
+
+/**
+ * 列出宿主机目录下的子目录。path 必须是宿主机形式（如 G:\20260619）；
+ * 省略表示只要盘符列表。
+ *
+ * query 绝对不能手工拼：路径里的 # 会被下游读成 fragment 分隔符，导致列到
+ * 父目录——这正是之前导入路径被截断成 G:\20260619 的同一个坑。交给
+ * URLSearchParams 编码成 %23 后，服务端 URL.Query() 能还原出原值。
+ */
+export async function foyerBrowse(path?: string): Promise<FoyerBrowseResult> {
+  const p = (path || '').trim();
+  const qs = new URLSearchParams();
+  if (p) qs.set('path', p);
+  const q = qs.toString();
+  const res = await fetch(`/foyer/browse${q ? `?${q}` : ''}`);
+  if (!res.ok) {
+    throw new ApiError((await res.text()) || '读取目录失败', res.status);
+  }
+  const data = (await res.json()) as Partial<FoyerBrowseResult>;
+  return {
+    ok: data.ok ?? true,
+    path: data.path || '',
+    parent: data.parent || '',
+    drives: data.drives || [],
+    entries: data.entries || [],
+  };
+}
+
