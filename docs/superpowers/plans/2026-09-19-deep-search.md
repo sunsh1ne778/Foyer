@@ -200,22 +200,27 @@ func TestWalkFindRecursesAndReportsPathsAndTypes(t *testing.T) {
 	}
 }
 
-// 只跟随真实目录：symlink 可以被命中，但它的目标子树不能进来（防环/防越界）。
+// 只跟随真实目录：symlink 本身能被命中，但它的目标子树不能进来（防环/防越界）。
 func TestWalkFindReportsSymlinkButDoesNotFollowIt(t *testing.T) {
 	f := newFakeReader()
 	f.set(meta.RootInode,
 		ent(10, "link-raw", meta.TypeSymlink, 4096, 100),
 	)
-	// 若遍历跟随了 symlink，它会去读 inode 10 以外的东西；这里把 10 挂成目录，
-	// 一旦被下钻就会读出 loop 条目。
-	f.set(10, ent(11, "loop", meta.TypeFile, 1, 1))
+	// inode 10 底下放一个**也含关键词**的子条目：若遍历跟随了 symlink，
+	// 它会被读到并多出一条命中。只断言「命中数 == 1」是不够的——
+	// 那个子条目必须能匹配，断言才有鉴别力。
+	f.set(10, ent(11, "raw-inside-loop", meta.TypeFile, 1, 1))
 
 	res := runFind(f, meta.RootInode, "/", "raw", false, 0)
-	if len(res.Matches) != 1 || res.Matches[0].Name != "link-raw" || res.Matches[0].Type != "symlink" {
-		t.Fatalf("symlink 本身应被命中且类型为 symlink: %+v", res.Matches)
-	}
 	if len(res.Matches) != 1 {
-		t.Fatalf("不得下钻 symlink: %+v", res.Matches)
+		t.Fatalf("只应命中 symlink 自身；多出命中说明下钻了 symlink: %+v", res.Matches)
+	}
+	if res.Matches[0].Name != "link-raw" || res.Matches[0].Type != "symlink" {
+		t.Fatalf("symlink 本身应被命中且类型为 symlink: %+v", res.Matches[0])
+	}
+	// 不下钻也意味着不会把它当目录去 Readdir。
+	if res.Scanned != 1 {
+		t.Fatalf("scanned = %d, want 1（只看到 link-raw 一个条目）", res.Scanned)
 	}
 }
 
@@ -369,7 +374,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"strings"
 	"syscall"
@@ -1019,7 +1023,7 @@ Expected: FAIL —— `/foyer/search` 尚未注册，三条路由测试都拿到
 
 - [ ] **Step 3: 注册 `/foyer/search`**
 
-修改 `server/internal/foyer/health.go`，在 `/foyer/usage` handler 之后插入：
+修改 `server/internal/foyer/health.go`，在 `/foyer/usage` handler 的收尾 `})` 之后、`mux.HandleFunc("/foyer/browse"` 之前插入。`run` 与 `cfg` 都是 `NewHealthMux` 里已有的局部/参数，直接可用：
 
 ```go
 	mux.HandleFunc("/foyer/search", func(w http.ResponseWriter, r *http.Request) {
