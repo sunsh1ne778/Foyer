@@ -8,11 +8,13 @@ import {
   Info,
   ShieldAlert,
   FileCheck,
+  FolderOpen,
   Loader2
 } from 'lucide-react';
 import { useFileStore } from '../context/FileStoreContext';
 import { DriverType, DriverCaps } from '../types';
 import { foyerHealth } from '../api/jfs';
+import { DirectoryPicker } from './DirectoryPicker';
 
 export const NewMountModal: React.FC = () => {
   const { isNewMountOpen, setIsNewMountOpen, addMount, mounts, previewLocalImport } = useFileStore();
@@ -22,6 +24,7 @@ export const NewMountModal: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [ingestMode, setIngestMode] = useState<'metadata' | 'copy' | 'empty'>('metadata');
   const [hostHint, setHostHint] = useState<{ host_data?: string; host_mount?: string; host_drives?: string[] }>({});
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   // S3 / MinIO spec
   const [endpoint, setEndpoint] = useState('https://s3.us-west-2.amazonaws.com');
@@ -50,6 +53,7 @@ export const NewMountModal: React.FC = () => {
 
   useEffect(() => {
     if (!isNewMountOpen) return;
+    setIsPickerOpen(false);
     foyerHealth()
       .then(h => {
         setHostHint({
@@ -423,20 +427,30 @@ export const NewMountModal: React.FC = () => {
               </div>
               <div>
                 <label className="text-[11px] text-slate-600">宿主机目录:</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="E:\data\photos"
-                  value={localRoot}
-                  onChange={e => { setLocalRoot(e.target.value); setPreview(null); }}
-                  className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-slate-800 mt-0.5 focus:outline-none focus:border-indigo-500 font-mono text-xs"
-                />
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <input
+                    type="text"
+                    required
+                    placeholder="E:\data\photos"
+                    value={localRoot}
+                    onChange={e => { setLocalRoot(e.target.value); setPreview(null); }}
+                    className="flex-1 bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setIsPickerOpen(true)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 font-medium shrink-0"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>浏览…</span>
+                  </button>
+                </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  填本机绝对路径即可，例如 D:\backup 或 E:\photos。启动时会把本机已有盘符绑进容器
+                  填本机绝对路径，或点「浏览…」从已绑定盘符里逐级选。启动时会把本机已有盘符绑进容器
                   {hostHint.host_drives && hostHint.host_drives.length
                     ? `（当前：${hostHint.host_drives.join(' ')}）`
                     : '；若列表为空请用 scripts/run-foyer.ps1 重建'}
-                  。浏览器不能直接选中系统文件夹，路径需手动填写。
+                  。
                 </p>
               </div>
             </div>
@@ -554,6 +568,17 @@ export const NewMountModal: React.FC = () => {
           </div>
         </form>
       </div>
+
+      <DirectoryPicker
+        open={isPickerOpen}
+        initialPath={localRoot}
+        onSelect={p => {
+          setLocalRoot(p);
+          setPreview(null); // 路径变了，旧预检结果作废
+          setIsPickerOpen(false);
+        }}
+        onClose={() => setIsPickerOpen(false)}
+      />
     </div>
   );
 };
