@@ -132,3 +132,36 @@ func DetectHostDrives(base string) []string {
 	}
 	return out
 }
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// toBackslash 把容器内的相对路径片段转成 Windows 分隔符。
+func toBackslash(p string) string {
+	return strings.ReplaceAll(strings.TrimPrefix(p, "/"), "/", "\\")
+}
+
+// HostPathFromContainer 把容器内路径还原成宿主机路径（盘符形式），是
+// MapHostPath 盘符分支的逆运算。
+//
+// 只覆盖盘符绑定：MapHostPath 对 G:\... 一律映射到 <HostMountBase>/g/...，
+// 所以目录选择器产出的条目都在这个根下。FOYER_HOST_DATA 那套（/host）不做
+// 反向映射——它只接非盘符路径，且被盘符分支抢先，硬映射会产出回喂 MapHostPath
+// 后落到 /mnt 的静默错误值。
+func HostPathFromContainer(cfg Config, containerPath string) (string, error) {
+	p := path.Clean("/" + strings.TrimPrefix(filepath.ToSlash(containerPath), "/"))
+	base := hostMountBase(cfg)
+	if !underRoot(p, base) {
+		return "", fmt.Errorf("container path %s is not under %s", containerPath, base)
+	}
+	rest := ""
+	if p != base {
+		rest = strings.TrimPrefix(p, base+"/")
+	}
+	letter, tail, _ := strings.Cut(rest, "/")
+	if len(letter) != 1 || !isASCIILetter(letter[0]) {
+		return "", fmt.Errorf("%s is not a drive directory", containerPath)
+	}
+	return strings.ToUpper(letter) + ":\\" + toBackslash(tail), nil
+}

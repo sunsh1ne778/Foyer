@@ -94,3 +94,47 @@ func TestMapHostPathUsesConfiguredBase(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
+
+func TestHostPathFromContainer(t *testing.T) {
+	cfg := Config{}
+	cases := []struct{ in, want string }{
+		{"/mnt/g", `G:\`},
+		{"/mnt/g/20260619", `G:\20260619`},
+		{"/mnt/g/20260619/#整理完成", `G:\20260619\#整理完成`},
+		{"/mnt/d/photos/raw", `D:\photos\raw`},
+		{"/mnt/c/Program Files/a", `C:\Program Files\a`},
+	}
+	for _, c := range cases {
+		got, err := HostPathFromContainer(cfg, c.in)
+		if err != nil {
+			t.Fatalf("%s: %v", c.in, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s: got %q want %q", c.in, got, c.want)
+		}
+	}
+	// 绑定根自身不是某个盘符目录；非盘符路径一律拒绝。
+	for _, bad := range []string{"/mnt", "/etc", "/host", "/mnt/gg/x", ""} {
+		if got, err := HostPathFromContainer(cfg, bad); err == nil {
+			t.Fatalf("%q should fail, got %q", bad, got)
+		}
+	}
+}
+
+// 回填给前端的路径必须能被 MapHostPath 原样还原，否则 resync 会落到别的目录。
+func TestHostPathRoundTrip(t *testing.T) {
+	cfg := Config{}
+	for _, host := range []string{`G:\`, `G:\20260619`, `G:\20260619\#整理完成`, `D:\photos\raw`, `E:\a b\中 文`} {
+		container, err := MapHostPath(cfg, host)
+		if err != nil {
+			t.Fatalf("%s: %v", host, err)
+		}
+		back, err := HostPathFromContainer(cfg, container)
+		if err != nil {
+			t.Fatalf("%s -> %s: %v", host, container, err)
+		}
+		if back != host {
+			t.Fatalf("round trip %q -> %q -> %q", host, container, back)
+		}
+	}
+}
