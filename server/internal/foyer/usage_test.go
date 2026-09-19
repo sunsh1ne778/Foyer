@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -77,40 +78,62 @@ func TestRunnerUsageParsesFakeBin(t *testing.T) {
 	}
 }
 
-// 容量解析规则只应有一处：配额优先，否则物理盘总量。
-// CapacitySet 是 CLI 契约的透传（「卷是否设了配额」），不表示「分母是否解析出来」；
-// 分母是否存在看 Capacity != 0。
-func TestBuildUsageResponsePrefersQuotaOverDisk(t *testing.T) {
+// 物理盘可读时三个 disk 字段必须原样带出：分母来自实时采样，不是配置额度。
+func TestBuildUsageResponseCarriesDiskFields(t *testing.T) {
 	disk := DiskSpace{Total: 1000, Used: 400, Free: 600}
-
-	// 未设配额 -> 用物理盘总量当分母，但 capacity_set 仍为 false（没有配额）。
-	unset := BuildUsageResponse(VolumeUsage{Used: 10, UsedInodes: 3}, disk, true, nil)
-	if unset.Volume.CapacitySet {
-		t.Fatalf("未设配额时 capacity_set 必须为 false: %+v", unset.Volume)
-	}
-	if unset.Volume.Capacity != 1000 {
-		t.Fatalf("未设配额应回退物理盘总量: %+v", unset.Volume)
-	}
-	if unset.Volume.DiskTotal != 1000 || unset.Volume.DiskUsed != 400 {
-		t.Fatalf("物理盘数字必须原样带出: %+v", unset.Volume)
-	}
-
-	// 设了配额 -> 配额优先，且 capacity_set 为真。
-	set := BuildUsageResponse(VolumeUsage{Capacity: 2048, CapacitySet: true, Used: 10}, disk, true, nil)
-	if !set.Volume.CapacitySet || set.Volume.Capacity != 2048 {
-		t.Fatalf("设了配额应优先: %+v", set.Volume)
+	got := BuildUsageResponse(VolumeUsage{Used: 10, UsedInodes: 3}, disk, true, nil)
+	if got.Volume.DiskTotal != 1000 || got.Volume.DiskUsed != 400 || got.Volume.DiskFree != 600 {
+		t.Fatalf("disk fields must be carried verbatim: %+v", got.Volume)
 	}
 }
 
-// 物理盘读不到时不能编一个分母。
-func TestBuildUsageResponseWithoutDiskLeavesCapacityZero(t *testing.T) {
-	got := BuildUsageResponse(VolumeUsage{Used: 10}, DiskSpace{}, false, nil)
-	if got.Volume.Capacity != 0 || got.Volume.CapacitySet {
-		t.Fatalf("读不到物理盘时应诚实报 0: %+v", got.Volume)
+// 读不到物理盘就没有分母：三个 disk 字段一律 0，不编数、不回退。
+func TestBuildUsageResponseWithoutDiskLeavesDiskFieldsZero(t *testing.T) {
+	got := BuildUsageResponse(VolumeUsage{Used: 10, UsedInodes: 3}, DiskSpace{}, false, nil)
+	if got.Volume.DiskTotal != 0 || got.Volume.DiskUsed != 0 || got.Volume.DiskFree != 0 {
+		t.Fatalf("no live sample -> no denominator, disk fields must be 0: %+v", got.Volume)
 	}
 }
 
-func TestUsageRouteReturnsResolvedCapacity(t *testing.T) {
+// 逻辑用量与 diskOK 无关，始终透传。
+func TestBuildUsageResponseAlwaysPassesVolumeUsage(t *testing.T) {
+	for _, diskOK := range []bool{true, false} {
+		got := BuildUsageResponse(VolumeUsage{Used: 1919472140288, UsedInodes: 2538}, DiskSpace{Total: 1}, diskOK, nil)
+		if got.Volume.Used != 1919472140288 || got.Volume.UsedInodes != 2538 {
+			t.Fatalf("diskOK=%v: volume usage must pass through: %+v", diskOK, got.Volume)
+		}
+	}
+	if got := BuildUsageResponse(VolumeUsage{}, DiskSpace{}, false, nil); got.Summaries == nil {
+		t.Fatal("summaries must never be null in JSON")
+	}
+}
+
+// 载荷里不能再出现 capacity/capacity_set：留着它就是在邀请下一个人拿它当分母。
+func TestUsagePayloadHasNoCapacityKeys(t *testing.T) {
+	resp := BuildUsageResponse(
+		VolumeUsage{Capacity: 4096, CapacitySet: true, Used: 7, UsedInodes: 2},
+		DiskSpace{Total: 1000, Used: 400, Free: 600}, true,
+		[]PathUsage{{Path: "/photos"}})
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
+		t.Fatal(err)
+	}
+	var vol map[string]json.RawMessage
+	if err := json.Unmarshal(top["volume"], &vol); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"capacity", "capacity_set"} {
+		if _, ok := vol[key]; ok {
+			t.Fatalf("payload must not expose %q: %s", key, b)
+		}
+	}
+}
+
+func TestUsageRouteReturnsDiskFields(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		// StatDisk 在非 linux 上失败关闭；这条断言只在 Linux CI/容器里真跑。
 		t.Skip("statfs assertions are linux-only")
@@ -127,21 +150,25 @@ func TestUsageRouteReturnsResolvedCapacity(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Volume.Used != 1919472140288 {
-		t.Fatalf("volume used: %+v", got.Volume)
+	if got.Volume.Used != 1919472140288 || got.Volume.UsedInodes != 2538 {
+		t.Fatalf("volume usage: %+v", got.Volume)
 	}
-	// 物理盘可读 -> 分母必须非 0。本卷未设配额，所以 capacity_set 仍为 false。
-	if got.Volume.Capacity == 0 || got.Volume.DiskTotal == 0 {
-		t.Fatalf("物理盘可读时 capacity 必须是真实分母: %+v", got.Volume)
+	// 物理盘可读 -> disk_total 必须来自实时采样（非 0）。
+	if got.Volume.DiskTotal == 0 {
+		t.Fatalf("物理盘可读时 disk_total 必须是实时采样: %+v", got.Volume)
 	}
 	if len(got.Summaries) != 2 || got.Summaries[0].Path != "/photos/a" {
 		t.Fatalf("summaries: %+v", got.Summaries)
 	}
 }
 
-// 非 linux 上物理盘读不到，端点必须诚实报 capacity=0 而不是编一个数。
-func TestUsageRouteWithoutDiskReportsZeroCapacity(t *testing.T) {
-	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true), DataDisk: ""}
+// 读不到盘不能炸接口：仍返回 200，且三个 disk 字段都是 0（消费方据此不画进度条）。
+func TestUsageRouteSurvivesStatDiskFailure(t *testing.T) {
+	cfg := Config{
+		MetaURL:    "redis://x",
+		JuiceFSBin: writeFakeJuice(t, true),
+		DataDisk:   filepath.Join(t.TempDir(), "definitely-missing"),
+	}
 	mux := NewHealthMux(cfg)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/usage", nil))
@@ -152,8 +179,11 @@ func TestUsageRouteWithoutDiskReportsZeroCapacity(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Volume.Capacity != 0 || got.Volume.CapacitySet {
-		t.Fatalf("读不到物理盘时必须报 0: %+v", got.Volume)
+	if got.Volume.DiskTotal != 0 || got.Volume.DiskUsed != 0 || got.Volume.DiskFree != 0 {
+		t.Fatalf("读不到盘时三个 disk 字段都必须是 0: %+v", got.Volume)
+	}
+	if got.Volume.Used != 1919472140288 {
+		t.Fatalf("卷用量仍须透传: %+v", got.Volume)
 	}
 }
 

@@ -23,6 +23,10 @@ type PathUsage struct {
 
 // DiskSpace 是物理数据盘的容量快照。读不到盘时调用方传 diskOK=false
 // （见 BuildUsageResponse），本类型自身没有 error 字段。
+//
+// Used 与 Total 同源但**不互补**：Used = Blocks-Bfree（文件真实占用，同 df 的
+// Used），Free = Bavail（同 df 的 Avail），Used+Free 的缺口是保留块。
+// 占用率请用 Used/Total，别用 (Total-Free)/Total。
 type DiskSpace struct {
 	Total uint64 `json:"total"`
 	Used  uint64 `json:"used"`
@@ -32,6 +36,9 @@ type DiskSpace struct {
 // VolumeUsage 是 `juicefs usage` 的原始卷级输出，字段语义以 CLI 契约为准。
 // 它与 UsageVolume 同名不同义，不可互换：前者是本包解析出的原始值，后者是
 // GET /foyer/usage 处理后的 API 载荷。
+//
+// Capacity/CapacitySet 仍是 CLI 契约的一部分（CLI 照旧会报配置的额度），但本服务
+// 的 API 载荷刻意不暴露它们——额度是静态快照，不能当进度条分母，理由见 UsageVolume。
 type VolumeUsage struct {
 	Capacity    uint64 `json:"capacity"`
 	CapacitySet bool   `json:"capacity_set"`
@@ -41,21 +48,17 @@ type VolumeUsage struct {
 	AvailInodes uint64 `json:"avail_inodes"`
 }
 
-// UsageVolume 是 GET /foyer/usage 里的卷级用量，Capacity 已把「分母」解析好。
-// 它与 VolumeUsage 同名不同义、不可互换：VolumeUsage 是 `juicefs usage` 的原始输出，
-// UsageVolume 是处理后的 API 载荷。
+// UsageVolume 是 GET /foyer/usage 的卷级载荷：逻辑用量 + 物理数据盘实时占用。
+//
+// 这里**没有** capacity/capacity_set：进度条分母不是「配置的额度」。额度是静态
+// 快照，而挂载源依赖的是共享且动态的磁盘资源（同一块盘上还有别的目录在长），
+// 写死的额度立刻失真。分母必须来自实时采样，见 DiskSpace 的注释。
 type UsageVolume struct {
-	// Capacity 是进度条分母：设了配额用配额，否则用物理数据盘总量；都没有则 0。
-	Capacity uint64 `json:"capacity"`
-	// CapacitySet 表示「卷配置了容量配额吗」，语义与 CLI 契约里的
-	// volume.capacity_set 完全一致（即 VolumeUsage.CapacitySet 的原样透传）；
-	// 它 NOT 表示「分母解析出来了吗」。要判断分母是否存在请看 Capacity != 0。
-	CapacitySet bool   `json:"capacity_set"`
-	Used        uint64 `json:"used"`
-	UsedInodes  uint64 `json:"used_inodes"`
-	DiskTotal   uint64 `json:"disk_total"`
-	DiskUsed    uint64 `json:"disk_used"`
-	DiskFree    uint64 `json:"disk_free"`
+	Used       uint64 `json:"used"`
+	UsedInodes uint64 `json:"used_inodes"`
+	DiskTotal  uint64 `json:"disk_total"`
+	DiskUsed   uint64 `json:"disk_used"`
+	DiskFree   uint64 `json:"disk_free"`
 }
 
 type UsageResponse struct {
@@ -95,17 +98,14 @@ func parseUsage(text string) (UsageResult, error) {
 	return res, nil
 }
 
-// BuildUsageResponse 合并卷用量与物理盘容量。纯函数：容量解析规则（配额优先、
-// 否则物理盘、都没有就诚实报 0）只在这一处，别在 handler 里再写一遍。
-// 注意：CapacitySet 只做透传（「卷是否设了配额」），回退到物理盘时也不会置真；
-// 分母是否存在请判断 Capacity != 0。
+// BuildUsageResponse 合并卷用量与物理数据盘占用。纯函数：磁盘字段是否带出
+// 只取决于 diskOK，这里不做任何"分母回退"——没有实时采样就没有分母，
+// 消费方据此不画进度条。
 func BuildUsageResponse(vol VolumeUsage, disk DiskSpace, diskOK bool, summaries []PathUsage) UsageResponse {
 	out := UsageResponse{
 		Volume: UsageVolume{
-			CapacitySet: vol.CapacitySet,
-			Used:        vol.Used,
-			UsedInodes:  vol.UsedInodes,
-			Capacity:    vol.Capacity,
+			Used:       vol.Used,
+			UsedInodes: vol.UsedInodes,
 		},
 		Summaries: summaries,
 	}
@@ -113,9 +113,6 @@ func BuildUsageResponse(vol VolumeUsage, disk DiskSpace, diskOK bool, summaries 
 		out.Volume.DiskTotal = disk.Total
 		out.Volume.DiskUsed = disk.Used
 		out.Volume.DiskFree = disk.Free
-	}
-	if out.Volume.Capacity == 0 && diskOK {
-		out.Volume.Capacity = disk.Total
 	}
 	if out.Summaries == nil {
 		out.Summaries = []PathUsage{}
