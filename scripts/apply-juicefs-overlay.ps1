@@ -18,6 +18,8 @@ Copy-Item -Path (Join-Path $src "cmd\usage.go") -Destination (Join-Path $dst "cm
 Copy-Item -Path (Join-Path $src "cmd\usage_test.go") -Destination (Join-Path $dst "cmd\usage_test.go") -Force
 Copy-Item -Path (Join-Path $src "cmd\unflag.go") -Destination (Join-Path $dst "cmd\unflag.go") -Force
 Copy-Item -Path (Join-Path $src "cmd\unflag_test.go") -Destination (Join-Path $dst "cmd\unflag_test.go") -Force
+Copy-Item -Path (Join-Path $src "cmd\find.go") -Destination (Join-Path $dst "cmd\find.go") -Force
+Copy-Item -Path (Join-Path $src "cmd\find_test.go") -Destination (Join-Path $dst "cmd\find_test.go") -Force
 
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $reader = Join-Path $dst "pkg\vfs\reader.go"
@@ -49,6 +51,11 @@ if ($m -notmatch 'cmdUnflag\(\),') {
 if ($m -notmatch 'cmdUsage\(\),') {
   $m2 = [regex]::Replace($m, '\t\t\tcmdStat\(\),\r?\n', "`t`t`tcmdStat(),`n`t`t`tcmdUsage(),`n", 1)
   if ($m2 -eq $m) { throw "main.go cmdStat() hook site not found" }
+  $m = $m2
+}
+if ($m -notmatch 'cmdFind\(\),') {
+  $m2 = [regex]::Replace($m, '\t\t\tcmdUnflag\(\),\r?\n', "`t`t`tcmdUnflag(),`n`t`t`tcmdFind(),`n", 1)
+  if ($m2 -eq $m) { throw "main.go cmdUnflag() hook site not found" }
   $m = $m2
 }
 [IO.File]::WriteAllText($main, $m, $utf8)
