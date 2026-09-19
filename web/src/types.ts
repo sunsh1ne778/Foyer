@@ -102,3 +102,17 @@ export interface SystemClusterInfo {
   activeSessions: number;
   indexCount: number;
 }
+
+/** 一条深度检索命中，已归到某个挂载上。 */
+export interface SearchHit {
+  mount: string;
+  /** 挂载内绝对路径，可直接交给 navigateTo(mount, parentKey(key))。 */
+  key: string;
+  name: string;
+  isDir: boolean;
+  size: number;
+  /** ISO-8601 UTC。 */
+  mtime: string;
+  /** 卷内绝对路径，仅供展示与排查。 */
+  volumePath: string;
+}
