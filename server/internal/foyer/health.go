@@ -25,10 +25,10 @@ func RedactMetaURL(raw string) string {
 
 func HealthJSON(cfg Config) []byte {
 	b, _ := json.Marshal(map[string]any{
-		"ok":         true,
-		"volume":     cfg.Volume,
-		"gateway":    cfg.GatewayListen,
-		"meta":       RedactMetaURL(cfg.MetaURL),
+		"ok":          true,
+		"volume":      cfg.Volume,
+		"gateway":     cfg.GatewayListen,
+		"meta":        RedactMetaURL(cfg.MetaURL),
 		"host_data":   cfg.HostData,
 		"host_mount":  cfg.HostMount,
 		"host_drives": DetectHostDrives(hostMountBase(cfg)),
@@ -82,6 +82,26 @@ func NewHealthMux(cfg Config) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stats": res})
+	})
+	mux.HandleFunc("/foyer/usage", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var paths []string
+		for _, p := range r.URL.Query()["path"] {
+			if p = strings.TrimSpace(p); p != "" {
+				paths = append(paths, p)
+			}
+		}
+		res, err := run.Usage(cfg, paths)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		disk, derr := StatDisk(cfg.DataDisk)
+		writeJSON(w, http.StatusOK, BuildUsageResponse(res.Volume, disk, derr == nil, res.Summaries))
 	})
 	mux.HandleFunc("/foyer/browse", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

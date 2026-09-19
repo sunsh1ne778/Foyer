@@ -1,6 +1,10 @@
 package foyer
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -103,5 +107,62 @@ func TestBuildUsageResponseWithoutDiskLeavesCapacityZero(t *testing.T) {
 	got := BuildUsageResponse(VolumeUsage{Used: 10}, DiskSpace{}, false, nil)
 	if got.Volume.Capacity != 0 || got.Volume.CapacitySet {
 		t.Fatalf("读不到物理盘时应诚实报 0: %+v", got.Volume)
+	}
+}
+
+func TestUsageRouteReturnsResolvedCapacity(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		// StatDisk 在非 linux 上失败关闭；这条断言只在 Linux CI/容器里真跑。
+		t.Skip("statfs assertions are linux-only")
+	}
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true), DataDisk: t.TempDir()}
+	mux := NewHealthMux(cfg)
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/usage?path=/photos/a&path=/photos/b", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var got UsageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Volume.Used != 1919472140288 {
+		t.Fatalf("volume used: %+v", got.Volume)
+	}
+	// 物理盘可读 -> 分母必须非 0。本卷未设配额，所以 capacity_set 仍为 false。
+	if got.Volume.Capacity == 0 || got.Volume.DiskTotal == 0 {
+		t.Fatalf("物理盘可读时 capacity 必须是真实分母: %+v", got.Volume)
+	}
+	if len(got.Summaries) != 2 || got.Summaries[0].Path != "/photos/a" {
+		t.Fatalf("summaries: %+v", got.Summaries)
+	}
+}
+
+// 非 linux 上物理盘读不到，端点必须诚实报 capacity=0 而不是编一个数。
+func TestUsageRouteWithoutDiskReportsZeroCapacity(t *testing.T) {
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true), DataDisk: ""}
+	mux := NewHealthMux(cfg)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/usage", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var got UsageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Volume.Capacity != 0 || got.Volume.CapacitySet {
+		t.Fatalf("读不到物理盘时必须报 0: %+v", got.Volume)
+	}
+}
+
+func TestUsageRouteRejectsNonGet(t *testing.T) {
+	cfg := Config{MetaURL: "redis://x", JuiceFSBin: writeFakeJuice(t, true), DataDisk: "/"}
+	mux := NewHealthMux(cfg)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/foyer/usage", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status %d", rr.Code)
 	}
 }
