@@ -16,6 +16,7 @@ type Config struct {
 	GatewayRootPass string
 	HostData        string
 	HostMount       string
+	HostMountBase   string
 	MountsFile      string
 }
 
@@ -41,6 +42,7 @@ func LoadConfig() Config {
 		GatewayRootPass: envOr("MINIO_ROOT_PASSWORD", "foyersecret"),
 		HostData:        envOr("FOYER_HOST_DATA", ""),
 		HostMount:       envOr("FOYER_HOST_MOUNT", "/host"),
+		HostMountBase:   envOr("FOYER_HOST_MOUNT_BASE", "/mnt"),
 		MountsFile:      envOr("FOYER_MOUNTS_FILE", "/var/lib/foyer/mounts.json"),
 	}
 }

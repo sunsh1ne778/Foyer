@@ -2,6 +2,8 @@ package foyer
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,5 +64,33 @@ func TestFileURIEncodesReservedChars(t *testing.T) {
 	}
 	if want := "/mnt/g/20260619/#整理完成/"; u.Path != want {
 		t.Fatalf("round-trip: got %q want %q (uri %s)", u.Path, want, got)
+	}
+}
+
+func TestDetectHostDrivesUsesConfiguredBase(t *testing.T) {
+	mnt := t.TempDir()
+	for _, name := range []string{"g", "toolong"} {
+		if err := os.MkdirAll(filepath.Join(mnt, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := DetectHostDrives(mnt)
+	if len(got) != 1 || got[0] != `G:\` {
+		t.Fatalf("got %v", got)
+	}
+	if DetectHostDrives(filepath.Join(mnt, "missing")) != nil {
+		t.Fatal("missing base must yield nil")
+	}
+}
+
+func TestMapHostPathUsesConfiguredBase(t *testing.T) {
+	cfg := Config{HostMountBase: t.TempDir()}
+	got, err := MapHostPath(cfg, `G:\20260619`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.ToSlash(cfg.HostMountBase) + "/g/20260619"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }

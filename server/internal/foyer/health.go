@@ -30,7 +30,7 @@ func HealthJSON(cfg Config) []byte {
 		"meta":       RedactMetaURL(cfg.MetaURL),
 		"host_data":   cfg.HostData,
 		"host_mount":  cfg.HostMount,
-		"host_drives": DetectHostDrives(),
+		"host_drives": DetectHostDrives(hostMountBase(cfg)),
 	})
 	return b
 }
