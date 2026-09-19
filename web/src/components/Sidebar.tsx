@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useFileStore } from '../context/FileStoreContext';
 import { formatBytes, getDriverColor } from '../utils/formatters';
+import { usagePercent } from '../utils/capacity';
 import { DriverType } from '../types';
 
 export const Sidebar: React.FC = () => {
@@ -69,8 +70,9 @@ export const Sidebar: React.FC = () => {
           const isSelected = currentMount === m.name;
           const colors = getDriverColor(m.type);
           const usedBytes = m.stats?.total_bytes || 0;
-          const capacityBytes = 2 * 1024 * 1024 * 1024 * 1024; // 2TB simulated capacity
-          const pct = Math.min(100, Math.round((usedBytes / capacityBytes) * 100));
+          // 真实分母来自控制面（配额优先，否则物理数据盘总量）；拿不到就不画进度条。
+          const capacityBytes = m.stats?.capacity_bytes || 0;
+          const pct = usagePercent(usedBytes, capacityBytes);
 
           return (
             <div
@@ -123,16 +125,26 @@ export const Sidebar: React.FC = () => {
               {/* Usage & Driver label */}
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
                 <span>{colors.label}</span>
-                <span>{formatBytes(usedBytes)}</span>
+                <span
+                  title={
+                    capacityBytes > 0
+                      ? `${formatBytes(usedBytes)} / ${formatBytes(capacityBytes)}（${pct}%）`
+                      : '控制面未返回用量'
+                  }
+                >
+                  {m.stats ? formatBytes(usedBytes) : '—'}
+                </span>
               </div>
 
-              {/* Mini progress bar */}
-              <div className="w-full h-1 bg-slate-200 rounded-full mt-1.5 overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${isSelected ? 'bg-indigo-600' : 'bg-slate-400'}`}
-                  style={{ width: `${Math.max(pct, 4)}%` }}
-                />
-              </div>
+              {/* 只有拿到真实容量才画进度条；没有分母时宁可不画。 */}
+              {capacityBytes > 0 && (
+                <div className="w-full h-1 bg-slate-200 rounded-full mt-1.5 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${isSelected ? 'bg-indigo-600' : 'bg-slate-400'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              )}
             </div>
           );
         })}

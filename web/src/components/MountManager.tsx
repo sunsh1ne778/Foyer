@@ -22,6 +22,7 @@ import { useFileStore } from '../context/FileStoreContext';
 import { isMetadataImport } from '../api/mounts';
 import { Mount, DriverType, DriverCaps } from '../types';
 import { formatBytes, formatDate, getDriverColor } from '../utils/formatters';
+import { usagePercent } from '../utils/capacity';
 
 export const MountManager: React.FC = () => {
   const {
@@ -111,6 +112,8 @@ export const MountManager: React.FC = () => {
           const isProbing = probingId === m.id;
           const thisProbeResult = probeResult?.id === m.id ? probeResult : null;
           const usedBytes = m.stats?.total_bytes || 0;
+          const capacityBytes = m.stats?.capacity_bytes || 0;
+          const pct = usagePercent(usedBytes, capacityBytes);
 
           return (
             <div
@@ -179,13 +182,31 @@ export const MountManager: React.FC = () => {
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-150 grid grid-cols-2 gap-2 text-xs mb-3">
                   <div>
                     <span className="text-slate-400 text-[11px] block">已索引对象</span>
-                    <span className="font-bold text-slate-800 font-mono">{m.stats?.node_count || 0} 个</span>
+                    <span className="font-bold text-slate-800 font-mono">
+                      {m.stats ? `${m.stats.node_count} 个` : '—'}
+                    </span>
                   </div>
                   <div>
                     <span className="text-slate-400 text-[11px] block">占用空间</span>
-                    <span className="font-bold text-slate-800 font-mono">{formatBytes(usedBytes)}</span>
+                    <span className="font-bold text-slate-800 font-mono">
+                      {m.stats ? formatBytes(usedBytes) : '—'}
+                    </span>
                   </div>
                 </div>
+
+                {capacityBytes > 0 && (
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mb-1">
+                      <span>占容量 {pct}%</span>
+                      <span>
+                        {formatBytes(usedBytes)} / {formatBytes(capacityBytes)}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-indigo-600" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )}
 
                 {isMetadataImport(m) && (
                   <p className="text-[11px] text-slate-400 font-mono mb-3 truncate" title={m.spec.root}>
