@@ -104,7 +104,7 @@ GET /foyer/browse?path=G:\20260619\#整理完成
 | 盘符未绑定 | `drive X: is not mounted into the container; run scripts/run-foyer.ps1 to rebind` |
 | 路径不存在 | `no such directory: G:\nope` |
 | 目标是文件 | `not a directory: G:\a.txt` |
-| 越界 | `path is outside the allowed roots (/mnt)` |
+| 越界 | `path is outside the allowed root (/mnt)` |
 | 无权限 | 透传 `os` 的错误文本 |
 
 ## 后端：反向映射 `HostPathFromContainer`
