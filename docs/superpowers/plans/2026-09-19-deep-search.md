@@ -891,11 +891,11 @@ POSIX 分支在 `usage` 那行之后插入：
 	script += "if [ \"$1\" = find ]; then printf '%s\\n' '{\"keyword\":\"raw\",\"matches\":[{\"path\":\"/photos/raw\",\"name\":\"raw\",\"type\":\"directory\",\"size\":4096,\"mtime\":1777690800,\"mtimensec\":0},{\"path\":\"/photos/raw/a.dng\",\"name\":\"a.dng\",\"type\":\"file\",\"size\":24576,\"mtime\":1777690801,\"mtimensec\":0}],\"scanned\":42,\"truncated\":false}'; exit 0; fi\n"
 ```
 
-Windows 分支在 `case "usage":` 之后插入：
+Windows 分支在 `case "usage":` 之后插入。**必须用转义的双引号字符串，不能用反引号 raw string**：这段代码是内联进 `writeFakeJuiceGo` 的 `src := \`package main...\`` 里的，嵌套反引号会提前终止外层 raw string 并让整个文件编译不过。既有 `import`/`stat`/`usage` 三个 case 也都是转义双引号写法，照它们来：
 
 ```go
 	case "find":
-		fmt.Println(`{"keyword":"raw","matches":[{"path":"/photos/raw","name":"raw","type":"directory","size":4096,"mtime":1777690800,"mtimensec":0},{"path":"/photos/raw/a.dng","name":"a.dng","type":"file","size":24576,"mtime":1777690801,"mtimensec":0}],"scanned":42,"truncated":false}`)
+		fmt.Println("{\"keyword\":\"raw\",\"matches\":[{\"path\":\"/photos/raw\",\"name\":\"raw\",\"type\":\"directory\",\"size\":4096,\"mtime\":1777690800,\"mtimensec\":0},{\"path\":\"/photos/raw/a.dng\",\"name\":\"a.dng\",\"type\":\"file\",\"size\":24576,\"mtime\":1777690801,\"mtimensec\":0}],\"scanned\":42,\"truncated\":false}")
 		os.Exit(0)
 ```
 
