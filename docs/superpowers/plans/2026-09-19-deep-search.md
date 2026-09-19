@@ -146,7 +146,8 @@ func TestWalkFindSkipsDotAndDotDot(t *testing.T) {
 	f.set(meta.RootInode,
 		ent(10, "raw", meta.TypeDirectory, 4096, 100),
 	)
-	f.set(10, ent(11, "a.dng", meta.TypeFile, 24576, 101))
+	// 子条目名刻意不含 "."，否则关键词 "." 会命中它，让下面的 len==0 断言不成立。
+	f.set(10, ent(11, "notes", meta.TypeFile, 24576, 101))
 
 	res := runFind(f, meta.RootInode, "/", ".", false, 0)
 	if len(res.Matches) != 0 {
@@ -155,7 +156,7 @@ func TestWalkFindSkipsDotAndDotDot(t *testing.T) {
 	if len(res.Errors) != 0 {
 		t.Fatalf("不应有错误（EIO 表示遍历在父子之间打转）: %+v", res.Errors)
 	}
-	// raw 与 a.dng 两个真实条目；"." 和 ".." 各出现两次不计。
+	// raw 与 notes 两个真实条目；"." 和 ".." 各出现两次不计。
 	if res.Scanned != 2 {
 		t.Fatalf("scanned = %d, want 2（只数真实条目）", res.Scanned)
 	}
