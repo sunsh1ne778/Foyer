@@ -118,7 +118,19 @@ export type ListEntry = {
   p?: string;
 };
 
-export async function listPrefix(dirPath: string): Promise<ListEntry[]> {
+export interface ListPrefixOptions {
+  /**
+   * 是否顺带把本层子目录的 mtime 从控制面补上（`attachDirMtimes`）。
+   *
+   * 默认 true——文件管理器依赖它。导出报表这条链上必须传 false：`walk` 会自己
+   * 按 500/批 stat 全部目录，若这里也补一次，每个目录会被查两遍同一个元数据
+   * 引擎（N 个目录约提交 2N 条路径）。而 `attachDirMtimes` 没有分批，宽目录
+   * （上万子目录）有 `juicefs stat` argv 超限的风险，所以不能反过来只留它。
+   */
+  withDirMtimes?: boolean;
+}
+
+export async function listPrefix(dirPath: string, opts: ListPrefixOptions = {}): Promise<ListEntry[]> {
   const prefixRaw = dirPath.replace(/^\/+/, '');
   const prefix = prefixRaw && !prefixRaw.endsWith('/') ? `${prefixRaw}/` : prefixRaw;
   const out = await s3().send(
@@ -157,7 +169,7 @@ export async function listPrefix(dirPath: string): Promise<ListEntry[]> {
       mtime: obj.LastModified?.toISOString(),
     });
   }
-  await attachDirMtimes(dirs);
+  if (opts.withDirMtimes !== false) await attachDirMtimes(dirs);
   return entries;
 }
 
