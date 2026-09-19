@@ -69,10 +69,11 @@ export const Sidebar: React.FC = () => {
         {mounts.map(m => {
           const isSelected = currentMount === m.name;
           const colors = getDriverColor(m.type);
-          const usedBytes = m.stats?.total_bytes || 0;
-          // 真实分母来自控制面（配额优先，否则物理数据盘总量）；拿不到就不画进度条。
-          const capacityBytes = m.stats?.capacity_bytes || 0;
-          const pct = usagePercent(usedBytes, capacityBytes);
+          const usedBytes = m.stats?.total_bytes || 0; // 逻辑用量，只作数字展示
+          const poolUsed = m.stats?.pool_used_bytes ?? 0; // 进度条分子
+          const poolTotal = m.stats?.pool_total_bytes ?? 0; // 进度条分母
+          const poolFree = m.stats?.pool_free_bytes;
+          const pct = usagePercent(poolUsed, poolTotal);
 
           return (
             <div
@@ -127,8 +128,8 @@ export const Sidebar: React.FC = () => {
                 <span>{colors.label}</span>
                 <span
                   title={
-                    capacityBytes > 0
-                      ? `${formatBytes(usedBytes)} / ${formatBytes(capacityBytes)}（${pct}%）`
+                    m.stats
+                      ? `占用空间（挂载逻辑大小） ${formatBytes(usedBytes)}`
                       : '控制面未返回用量'
                   }
                 >
@@ -136,13 +137,30 @@ export const Sidebar: React.FC = () => {
                 </span>
               </div>
 
-              {/* 只有拿到真实容量才画进度条；没有分母时宁可不画。 */}
-              {capacityBytes > 0 && (
-                <div className="w-full h-1 bg-slate-200 rounded-full mt-1.5 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${isSelected ? 'bg-indigo-600' : 'bg-slate-400'}`}
-                    style={{ width: `${pct}%` }}
-                  />
+              {/*
+                进度条画的是「所依赖那块盘」的实时占用，与上面那格的挂载逻辑大小
+                是两个量纲的数；因此条旁显示的是池自己的已用/总量。拿不到池
+                （poolTotal 缺席）就整条不画，绝不用 0 假装。
+              */}
+              {poolTotal > 0 && (
+                <div
+                  className="mt-1.5"
+                  title={`池占用 ${pct}% · 磁盘 ${formatBytes(poolUsed)} / ${formatBytes(poolTotal)}${
+                    poolFree != null ? ` · 剩 ${formatBytes(poolFree)}` : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mb-0.5">
+                    <span>池占用 {pct}%</span>
+                    <span>
+                      磁盘 {formatBytes(poolUsed)} / {formatBytes(poolTotal)}
+                    </span>
+                  </div>
+                  <div className="w-full h-1 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${isSelected ? 'bg-indigo-600' : 'bg-slate-400'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
               )}
             </div>

@@ -51,9 +51,22 @@ export function mountVolumePath(m: { id?: string; name: string; spec?: Record<st
  *
  * 控制面报 error 的路径刻意**不**贴 stats：宁可让 UI 显示「无数据」，也不能拿 0
  * 冒充真实用量（那正是这次要修的 bug）。
+ *
+ * 逻辑用量（size/used）与「所依赖那块盘的占用」（disk_*）是两个不同量纲的数，
+ * 分别存进 total_bytes/node_count 与 pool_*，绝不互相顶替。
  */
+
+/** 三项齐全才算拿到了池；omitempty 少了任一项就当作读不到（不补 0）。 */
+function poolOf(d: { disk_total?: number; disk_used?: number; disk_free?: number }) {
+  if (d.disk_total == null || d.disk_used == null || d.disk_free == null) return {};
+  return {
+    pool_total_bytes: d.disk_total,
+    pool_used_bytes: d.disk_used,
+    pool_free_bytes: d.disk_free,
+  };
+}
+
 export function applyUsage(mounts: ApiMount[], usage: FoyerUsage): void {
-  const cap = usage.volume.capacity;
   const byPath = new Map<string, FoyerUsage['summaries'][number]>();
   for (const s of usage.summaries || []) {
     if (s && s.path && !s.error) byPath.set(s.path, s);
@@ -63,11 +76,13 @@ export function applyUsage(mounts: ApiMount[], usage: FoyerUsage): void {
       m.stats = {
         total_bytes: usage.volume.used,
         node_count: usage.volume.used_inodes,
-        capacity_bytes: cap,
+        ...poolOf(usage.volume),
       };
       continue;
     }
     const s = byPath.get(mountVolumePath(m));
-    if (s) m.stats = { total_bytes: s.size, node_count: s.inodes, capacity_bytes: cap };
+    if (s) {
+      m.stats = { total_bytes: s.size, node_count: s.inodes, ...poolOf(s) };
+    }
   }
 }

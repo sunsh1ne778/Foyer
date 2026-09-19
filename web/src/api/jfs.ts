@@ -442,8 +442,6 @@ export async function foyerBrowse(path?: string): Promise<FoyerBrowseResult> {
 }
 
 export type FoyerUsageVolume = {
-  capacity: number;
-  capacity_set: boolean;
   used: number;
   used_inodes: number;
   disk_total: number;
@@ -459,6 +457,10 @@ export type FoyerUsageSummary = {
   files: number;
   dirs: number;
   inodes: number;
+  /** 该路径所依赖存储池的实时占用；读不到池时三项整体缺席（不是 0） */
+  disk_total?: number;
+  disk_used?: number;
+  disk_free?: number;
 };
 
 export type FoyerUsage = {

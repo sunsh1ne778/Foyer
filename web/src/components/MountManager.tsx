@@ -111,9 +111,11 @@ export const MountManager: React.FC = () => {
           const colors = getDriverColor(m.type);
           const isProbing = probingId === m.id;
           const thisProbeResult = probeResult?.id === m.id ? probeResult : null;
-          const usedBytes = m.stats?.total_bytes || 0;
-          const capacityBytes = m.stats?.capacity_bytes || 0;
-          const pct = usagePercent(usedBytes, capacityBytes);
+          const usedBytes = m.stats?.total_bytes || 0; // 逻辑用量，只作数字展示
+          const poolUsed = m.stats?.pool_used_bytes ?? 0; // 进度条分子
+          const poolTotal = m.stats?.pool_total_bytes ?? 0; // 进度条分母
+          const poolFree = m.stats?.pool_free_bytes;
+          const pct = usagePercent(poolUsed, poolTotal);
 
           return (
             <div
@@ -194,12 +196,22 @@ export const MountManager: React.FC = () => {
                   </div>
                 </div>
 
-                {capacityBytes > 0 && (
-                  <div className="mb-3">
+                {/*
+                  进度条画的是「所依赖那块盘」的实时占用，与上面「占用空间」的
+                  挂载逻辑大小是两个量纲的数；所以条旁显示池自己的已用/总量。
+                  poolTotal 缺席（读不到池）时整条不画，绝不用 0 假装。
+                */}
+                {poolTotal > 0 && (
+                  <div
+                    className="mb-3"
+                    title={`池占用 ${pct}% · 磁盘 ${formatBytes(poolUsed)} / ${formatBytes(poolTotal)}${
+                      poolFree != null ? ` · 剩 ${formatBytes(poolFree)}` : ''
+                    }`}
+                  >
                     <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mb-1">
-                      <span>占容量 {pct}%</span>
+                      <span>池占用 {pct}%</span>
                       <span>
-                        {formatBytes(usedBytes)} / {formatBytes(capacityBytes)}
+                        磁盘 {formatBytes(poolUsed)} / {formatBytes(poolTotal)}
                       </span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">

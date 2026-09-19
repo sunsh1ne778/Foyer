@@ -47,10 +47,17 @@ export async function health(): Promise<{ ok: boolean; error?: string }> {
 }
 
 export type ApiMountStats = {
+  /** 该挂载的逻辑用量（字节，DirStats 口径） */
   total_bytes: number;
+  /** 该挂载的 inode 数 */
   node_count: number;
-  /** 进度条分母：配额优先，否则物理数据盘总量；0 表示拿不到。 */
-  capacity_bytes: number;
+  /**
+   * 该挂载所依赖存储池的实时占用。三项**要么都有、要么都没有**：
+   * 缺席表示读不到池，此时不画进度条（不要退化成 0% 或 100%）。
+   */
+  pool_total_bytes?: number;
+  pool_used_bytes?: number;
+  pool_free_bytes?: number;
 };
 
 export type ApiMount = {

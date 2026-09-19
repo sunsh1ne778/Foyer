@@ -25,8 +25,13 @@ export interface Mount {
   stats?: {
     total_bytes: number;
     node_count: number;
-    /** 进度条分母（配额优先，否则物理盘）；0 或缺席时不画进度条。 */
-    capacity_bytes?: number;
+    /**
+     * 该挂载所依赖存储池的实时占用（进度条用它，不用逻辑总量）。
+     * 三项要么都有、要么都没有；缺席时按「池未知」处理，不画进度条。
+     */
+    pool_total_bytes?: number;
+    pool_used_bytes?: number;
+    pool_free_bytes?: number;
     last_reconciled?: string;
   };
 }
