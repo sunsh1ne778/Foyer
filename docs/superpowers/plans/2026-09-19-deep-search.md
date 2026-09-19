@@ -2275,7 +2275,126 @@ git commit -m "docs: record end-to-end verification for deep search"
 
 ## Verification Notes
 
-（Task 8 填写：日期、分支、HEAD、镜像与 juicefs 版本、`juicefs find` 原始输出、`/foyer/search` 原始响应、`scanned` 与 `used_inodes` 的对照、UI 实际渲染确认项与未验证项。）
+### 2026-09-19 22:30 CST — 真实容器端到端（Task 8）
+
+- 分支 `feat/foyer-mount-lifecycle-import`，HEAD `b0d947f`。
+- 镜像 `deploy-foyer:latest` = `0394e296a440`，构建于 `2026-09-19 22:30:10 +0800`；
+  容器 `deploy-foyer-1` 启动于 `22:30:41`。**先确认镜像真的重建了**（吸取上一轮用量任务的教训）：
+  所有源文件最后一次提交是 `22:25:59`，早于构建时间；且
+  `docker exec deploy-foyer-1 juicefs find --help` 退出码 0（`NAME: juicefs find - Search volume
+  paths by name as JSON`），`grep -ac 'foyer/search' /usr/local/bin/foyer` = **2**（旧镜像为 0）。
+- juicefs 版本 `1.3.0+unknown`（容器内 session 记录）。
+
+#### Step 2 — 命令行（含 flag 重排）
+
+```
+$ juicefs find redis://redis:6379/1 / --name host
+{"keyword":"host","matches":[{"path":"/host","name":"host","type":"directory","size":4096,"mtime":1789745325,"mtimensec":241491616},{"path":"/host/hello-from-host.txt","name":"hello-from-host.txt","type":"file","size":8,"mtime":1789744077,"mtimensec":971969500}],"scanned":2502,"truncated":false}
+
+$ juicefs find redis://redis:6379/1 / --name host --limit 1
+{"keyword":"host","matches":[{"path":"/host","name":"host","type":"directory","size":4096,"mtime":1789745325,"mtimensec":241491616}],"scanned":3,"truncated":true}
+
+$ juicefs find redis://redis:6379/1 / --name HOST --case-sensitive
+{"keyword":"HOST","matches":[],"scanned":2502,"truncated":false}
+```
+
+位置参数在前、flag 在后仍被正确解析（`main.go` 的 `reorderOptions` 生效）；`--limit 1` 时
+`truncated:true` 且只有 1 条；大小写敏感下 `HOST` 0 条（不敏感时 2 条）。
+
+`--limit 1` 的 `scanned:3` 不是异常：`Readdir` 批量返回父目录的全部子项，遍历在命中处 `return true`
+提前退出，所以 `scanned` 是「已访问」而非「全量」——与 `--help` 中 `"scanned" counts real entries
+visited` 的说法一致。
+
+#### Step 3 — 控制面端点
+
+```
+$ curl "http://127.0.0.1:8092/foyer/search?q=host"
+{"ok":true,"keyword":"host","matches":[{"path":"/host",...},{"path":"/host/hello-from-host.txt",...}],"scanned":2502,"truncated":false}
+
+$ curl "http://127.0.0.1:8092/foyer/search?q=%23"
+{"ok":true,"keyword":"#","matches":[{"path":"/20260619/#整理完成",...},{"path":"/gav/#整理完成",...},{"path":"/av_20260619/#未知女优",...},{"path":"/20260619/#整理完成/#未知女优",...},{"path":"/gav/#整理完成/#未知女优",...}],"scanned":2502,"truncated":false}
+
+$ curl -o NUL -w "%{http_code}" "http://127.0.0.1:8092/foyer/search"
+400
+```
+
+`%23` 能正确读出说明 query 未被 `#` 截断。干净结果里 `errors` 键**缺席**（不是空数组）。
+
+#### Step 4 — `scanned` 与 `used_inodes` 交叉核对
+
+```
+$ curl "http://127.0.0.1:8092/foyer/usage"
+{"volume":{"used":2433243119616,"used_inodes":3323,"disk_total":1081101176832,"disk_used":27958923264,"disk_free":998149898240},"summaries":[]}
+```
+
+`scanned` = **2502** vs 卷级 `used_inodes` = **3323**，同量级（少一些符合预期：回收站子树整体跳过、
+根本身不入 `scanned`、`.`/`..` 不计）。若是两位数则说明遍历没递归，此处不是。
+
+按前端 `listMounts` 的形状带上 `path` 再取一次（这条同时钉住了 `attributeMatches` 的输入契约：
+
+`summaries[].path` 必须与各挂载 `spec.dest` 逐字一致）：
+
+```
+$ curl "http://127.0.0.1:8092/foyer/usage?path=%2Fhost&path=%2Fdtest2&path=%2Fav_20260619"
+{"volume":{...},"summaries":[{"path":"/host","size":12288,"length":8,"files":1,"dirs":2,"inodes":3},
+{"path":"/dtest2","size":28672,...,"disk_total":1903616323584,...},
+{"path":"/av_20260619","size":576797478912,...,"disk_total":2000381014016,...}]}
+```
+
+注意：不带 `path` 时 `summaries` 恒为 `[]`（按设计只为请求到的 path 生成），前端每次都会传全部挂载 dest。
+
+#### Step 5 — 前端数据层对真实控制面的联调（替代不了浏览器，详见下）
+
+用真实控制面输出喂真实的 `jfs.foyerSearch` + `mergeMounts` + `attributeMatches`/`parentKey`/`pageSlice`
+（`npx tsx`，一次性脚本，跑完即删）：
+
+```
+merged mounts: foyer=>undefined | host=>"/host" | dtest2=>"/dtest2" | av_20260619=>"/av_20260619"
+
+=== q=host ===   matches = 2  → hits = 2
+  host :: /                    <- /host                     parent=/
+  host :: /hello-from-host.txt <- /host/hello-from-host.txt parent=/          (isDir=false)
+=== q=# ===      matches = 5  → hits = 5
+  foyer         :: /20260619/#整理完成             <- /20260619/#整理完成
+  foyer         :: /gav/#整理完成                  <- /gav/#整理完成
+  av_20260619   :: /#未知女优                      <- /av_20260619/#未知女优
+  foyer         :: /20260619/#整理完成/#未知女优   <- ...
+  foyer         :: /gav/#整理完成/#未知女优        <- ...
+=== 无命中 ===   matches = 0 | totalPages = 1 | items = 0
+越界页 → {"items":[3],"page":2,"totalPages":2}
+空关键词 → ApiError | status = 400 | message = q required
+```
+
+要点：① 挂载归属正确，`/20260619/#整理完成` **没有**被误归到 `/av_20260619`（段边界生效）；
+② 不在任何挂载 dest 下的命中按设计落到**卷挂载** `foyer`，`key` 保留卷内绝对路径——这一条只有在
+`mergeMounts` 把隐式卷挂载插到首位时才成立（`listMounts` 内部就是这么做的），单喂 `/foyer/mounts`
+的原始列表会让这些命中被静默丢弃；
+③ 空列表报 1 页、越界页夹紧，与 UI 的按钮 disabled 判定一致；
+④ `foyerSearch` 返回的 TS 对象上 `errors` 是 present-but-`undefined`（函数显式赋值），而服务端 JSON
+里该键缺席；两处消费者都只判 `undefined`，行为一致，无需处理。
+
+#### 未验证项（本会话能力所限，需人工）
+
+**Step 5 的全部渲染断言没有执行过**：本会话没有任何浏览器/playwright 类工具可用，仓库 vitest 又是
+node 环境、只 include `*.test.ts`（无 DOM 设施），所以结果视图切换、分页按钮、跳转选中、拖放高亮、
+返回目录这五项仍只是「代码审阅 + 类型检查」的结论。vite dev 已在 `http://localhost:3000` 运行
+（HTTP 200，`/foyer` → `127.0.0.1:8092` 代理已生效），人工核对只需一分钟：
+
+1. 进「文件」页，输入关键词 `host` 回车 → 列表区域变成结果视图，顶部「命中 2 项 · 已扫描 2502 项」。
+2. 点第 2 行「hello-from-host.txt」的跳转 → 进入 `host` 挂载根目录，且该行被选中高亮。
+3. 停在 `host` 挂载根目录、再搜一次 `host` 并点第 1 行的跳转（目标是**当前目录**）→ 仍应选中 `/host` 那一行
+   （这是修正轮 1 特意保住的 `revealTick` 路径，也是最容易复现 bug 的场景）。
+4. 搜 `#` → 5 条命中，其中 1 条挂载显示 `av_20260619`、4 条显示 `foyer`。
+5. 结果视图下拖一个文件进窗口 → **不该**出现靛蓝高亮，也不该上传。
+6. 点「返回目录」→ 回到原来的目录视图。
+7. 翻页只在命中数 > 100 时出现（本卷命中都是个位数），此项需造数据才能看到。
+
+### 观察（非缺陷，记录备查）
+
+- 卷内存在上一轮导入实验留下的孤立目录（`/20260619/#整理完成`、`/gav/#整理完成`）：当前挂载表里没有
+  对应 `dest`，因此按设计落到卷挂载 `foyer`。它们的「跳转」会进入 `foyer` 挂载的对应路径，属如实回报。
+- `/foyer/search` 与 `/foyer/usage` 一样**无鉴权**（既有约定，本次未收紧）。
+- `SearchResults` 的「跳转」按钮不区分「已在目标目录」，靠 context 的 `revealTick` 兜住。
 
 ## 已知取舍
 
