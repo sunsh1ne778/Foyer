@@ -81,7 +81,10 @@ func FileURI(containerPath string) string {
 	if p != "/" && !strings.HasSuffix(p, "/") {
 		p += "/"
 	}
-	return "file://" + p
+	// 必须走 url.URL 做百分号编码：文件名里的 #（还有 ?、%、空格等）直接拼进
+	// URI 会被下游的 url.Parse 当成 fragment/query 分隔符吃掉，导致导入路径
+	// 被截断到父目录。编码后 OpenStorageURI 的 u.Path 能还原出原始路径。
+	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
 func DetectHostDrives() []string {
