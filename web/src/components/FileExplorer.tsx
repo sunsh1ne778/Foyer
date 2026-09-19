@@ -25,6 +25,7 @@ import {
   MoreHorizontal
 } from 'lucide-react';
 import { useFileStore } from '../context/FileStoreContext';
+import { SearchResults } from './SearchResults';
 import { FSNode } from '../types';
 import { formatBytes, formatDate, getFileExtension } from '../utils/formatters';
 
@@ -61,6 +62,9 @@ export const FileExplorer: React.FC = () => {
     setSearchQuery,
     downloadNode,
     isLoadingDirectory,
+    deepSearch,
+    runDeepSearch,
+    exitDeepSearch,
   } = useFileStore();
 
   const [sortField, setSortField] = useState<'name' | 'size' | 'mtime'>('name');
@@ -178,6 +182,8 @@ export const FileExplorer: React.FC = () => {
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    // 结果视图下当前目录并不在屏幕上，拖放目标不可见，不能悄悄上传。
+    if (deepSearch.active) return;
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       for (let i = 0; i < e.dataTransfer.files.length; i++) {
         await uploadFile(e.dataTransfer.files[i]);
@@ -212,7 +218,11 @@ export const FileExplorer: React.FC = () => {
       <div className="h-12 px-4 border-b border-slate-200 flex items-center justify-between gap-4 bg-white shrink-0">
         {/* Left: Item counts & Selected Batch Toolbar */}
         <div className="flex items-center gap-3 text-xs">
-          {hasSelection ? (
+          {deepSearch.active ? (
+            <span className="text-slate-500 font-medium">
+              深度检索命中 <strong className="text-slate-800 font-mono">{deepSearch.hits.length}</strong> 项
+            </span>
+          ) : hasSelection ? (
             <div className="flex items-center gap-2 bg-indigo-50 text-indigo-900 px-2.5 py-1 rounded-md border border-indigo-200 font-medium animate-in fade-in duration-100">
               <span>已选 {selectedKeys.size} 项</span>
               <button
@@ -237,24 +247,46 @@ export const FileExplorer: React.FC = () => {
         </div>
 
         {/* Center: Clean Search Bar */}
-        <div className="flex-1 max-w-sm">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="搜索文件名或标签..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-sans"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-700"
-              >
-                ✕
-              </button>
-            )}
+        <div className="flex-1 max-w-md">
+          <div className="flex items-center gap-2">
+            <form
+              className="relative flex-1"
+              onSubmit={e => {
+                e.preventDefault();
+                void runDeepSearch(searchQuery);
+              }}
+            >
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="搜索本层，回车深度检索全部挂载…"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all font-sans"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    exitDeepSearch();
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-700"
+                >
+                  ✕
+                </button>
+              )}
+            </form>
+            <button
+              type="button"
+              onClick={() => void runDeepSearch(searchQuery)}
+              disabled={!searchQuery.trim()}
+              title="跨所有挂载、递归按名称检索（在输入框回车同效）"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium disabled:opacity-40 shrink-0"
+            >
+              <Search className="w-3.5 h-3.5 text-indigo-600" />
+              深度检索
+            </button>
           </div>
         </div>
 
@@ -311,7 +343,9 @@ export const FileExplorer: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
-        {sortedNodes.length === 0 ? (
+        {deepSearch.active ? (
+          <SearchResults />
+        ) : sortedNodes.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-400">
             <div className="w-14 h-14 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-3 text-slate-400">
               <Folder className="w-7 h-7" />
