@@ -2040,6 +2040,20 @@ import { SearchResults } from './SearchResults';
     if (deepSearch.active) return;
 ```
 
+但这只关掉了「真的上传」。`handleDragOver` 会无条件 `setIsDragging(true)`，于是结果视图下拖文件经过列表
+仍会亮起「松手就传这里」的 indigo 高亮，而松手其实什么都不做 —— 假可供性比不做更糟。同一处也要挡：
+
+```
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    // 结果视图下不接受拖放，连高亮都不该出现：它承诺了一个不会发生的上传。
+    if (deepSearch.active) return;
+    setIsDragging(true);
+  };
+```
+
+（`handleDragLeave` 保持原样：在结果视图下把 `isDragging` 置 false 是对的。）
+
 (d) 工具栏左簇在结果视图下让位给命中计数 —— 把
 
 ```
@@ -2161,7 +2175,9 @@ Run:
 rg -n "2 \* 1024 \* 1024 \* 1024 \* 1024|Math\.max\(pct, 4\)" web/src
 ```
 
-Expected: 无输出（`2TB simulated capacity` 与 `Math.max(pct, 4)` 在既有的用量任务里已被删除，本次不得引入同类假数据）。
+Expected: 仅剩两条**说明性注释**（`web/src/utils/capacity.ts:5`、`web/src/utils/capacity.test.ts:12`），
+它们是在解释「旧实现为什么假」，是文档而非代码，**不要删**。除这两行注释外不得有任何命中；
+若出现可执行代码命中，就是有人把假数据加了回来，要改代码而不是改这个检查。
 
 - [ ] **Step 5: 提交**
 
