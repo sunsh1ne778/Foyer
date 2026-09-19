@@ -88,6 +88,10 @@ services:
       FOYER_HOST_MOUNT_BASE: /mnt
       FOYER_HOST_DATA: ${FOYER_HOST_DATA:-}
       FOYER_MOUNTS_FILE: /var/lib/foyer/mounts.json
+      # 物理数据盘路径：容器根即底层磁盘（rustfs 数据卷同一块盘）。
+      FOYER_DATA_DISK_PATH: /
+      # 容量配额（GiB）。留空/0 = 用 FOYER_DATA_DISK_PATH 的总量自动推导。
+      FOYER_VOLUME_CAPACITY_GB: ${FOYER_VOLUME_CAPACITY_GB:-0}
       MINIO_ROOT_USER: foyerak
       MINIO_ROOT_PASSWORD: foyersecret
     volumes:

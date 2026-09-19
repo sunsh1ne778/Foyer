@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -108,4 +109,17 @@ func (r Runner) EnsureVolume(cfg Config) error {
 		return nil
 	}
 	return r.Format(cfg)
+}
+
+// ConfigArgs builds `juicefs config META --capacity <GiB> --yes`.
+// --capacity 的单位是 GiB（实测 `--capacity 4096` 得到 4 TiB）。
+func ConfigArgs(cfg Config, gb uint64) []string {
+	return []string{"config", cfg.MetaURL, "--capacity", strconv.FormatUint(gb, 10), "--yes"}
+}
+
+func (r Runner) Config(cfg Config, gb uint64) error {
+	if err := r.cmd(ConfigArgs(cfg, gb)...).Run(); err != nil {
+		return fmt.Errorf("juicefs config: %w", err)
+	}
+	return nil
 }

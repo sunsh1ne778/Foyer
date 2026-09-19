@@ -1,6 +1,7 @@
 package foyer
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -221,4 +222,54 @@ func main() {
 		t.Fatalf("build fake juicefs: %v\n%s", err, b)
 	}
 	return out
+}
+
+// writeFakeJuiceUsage 让 fake 回指定的卷用量与配额状态，并把 config 调用记到 config.txt。
+func writeFakeJuiceUsage(t *testing.T, used uint64, capacitySet bool, capacity uint64) string {
+	t.Helper()
+	dir := t.TempDir()
+	usageJSON := fmt.Sprintf(
+		`{"volume":{"capacity":%d,"capacity_set":%t,"used":%d,"used_inodes":3,"avail":0,"avail_inodes":0},"summaries":[]}`,
+		capacity, capacitySet, used)
+	if runtime.GOOS == "windows" {
+		src := `package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	switch os.Args[1] {
+	case "usage":
+		fmt.Println(` + "`" + usageJSON + "`" + `)
+	case "config":
+		out := filepath.Join(filepath.Dir(os.Args[0]), "config.txt")
+		_ = os.WriteFile(out, []byte(strings.Join(os.Args[1:], " ")), 0644)
+	}
+	os.Exit(0)
+}
+`
+		srcPath := filepath.Join(dir, "fakejuice.go")
+		if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+			t.Fatal(err)
+		}
+		out := filepath.Join(dir, "juicefs.exe")
+		cmd := exec.Command("go", "build", "-o", out, srcPath)
+		cmd.Dir = dir
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("build fake juicefs: %v\n%s", err, b)
+		}
+		return out
+	}
+	path := filepath.Join(dir, "juicefs")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = usage ]; then printf '%s\\n' '" + usageJSON + "'; exit 0; fi\n" +
+		"if [ \"$1\" = config ]; then echo \"$@\" > \"$(dirname \"$0\")/config.txt\"; exit 0; fi\n"
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
