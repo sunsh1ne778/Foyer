@@ -111,9 +111,31 @@ func TestBrowseSkipsSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Windows 上目录 symlink 的 IsDir() 是 true，靠显式的 ModeSymlink 检查拦下。
+	// Go ≥ 1.23 在 Windows 上目录 symlink/junction 在 os.ReadDir 里 IsDir()==false
+	// （junction 报 ModeIrregular，不带 ModeSymlink），实际由 !e.IsDir() 拦下。
 	if len(res.Entries) != 0 {
 		t.Fatalf("symlink must be skipped: %+v", res.Entries)
+	}
+}
+
+// 中间路径段是链接时，词法前缀检查与最后一段 Lstat 都拦不住，必须靠解析
+// 真实路径后的包含性校验。Windows 上 os.Symlink 需要特权，这里会 skip；
+// Linux CI 上会真正执行。
+func TestBrowseRejectsSymlinkEscape(t *testing.T) {
+	cfg, drive := fakeDriveEnv(t)
+	outside := filepath.Join(t.TempDir(), "outside")
+	mustMkdir(t, filepath.ToSlash(outside))
+	mustMkdir(t, filepath.Join(outside, "sub"))
+	if err := os.Symlink(outside, filepath.Join(drive, "link")); err != nil {
+		t.Skipf("symlink unsupported here: %v", err)
+	}
+	// 链接本身必须被拒（Lstat 最后一段检查）。
+	if res, err := Browse(cfg, `G:\link`); err == nil {
+		t.Fatalf("symlink itself must be rejected, got %+v", res)
+	}
+	// 穿过链接的子路径词法上仍在根内，但真实路径在根外，必须被拒。
+	if res, err := Browse(cfg, `G:\link\sub`); err == nil {
+		t.Fatalf("path traversing a symlink out of the root must be rejected, got %+v", res)
 	}
 }
 

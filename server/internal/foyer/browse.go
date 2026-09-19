@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -49,7 +50,9 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 
 	// 越界防护不是可选的加固：MapHostPath 对 "/etc" 这类绝对路径会原样放行
 	// （HostData 为空时走 `if strings.HasPrefix(s, "/")` 分支），只能在这里拦。
-	if !underRoot(container, base) {
+	// 两侧都过 containerStyle：base 由 env 配置，可能是 `//mnt`、`/mnt/.` 这类
+	// 未归一化的形状；container 在 Windows 上则可能没有前导斜杠。
+	if !underRoot(containerStyle(container), containerStyle(base)) {
 		return BrowseResult{}, fmt.Errorf("path is outside the allowed root (%s)", base)
 	}
 
@@ -67,6 +70,21 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 		return BrowseResult{}, fmt.Errorf("not a directory: %s", hostPath)
 	}
 
+	// 上面两步都不够：词法前缀比较只看字符串，Lstat 只对最后一段生效。若中间
+	// 路径段是指向根外的符号链接/junction，`G:\link\sub` 映射后词法仍在根内，
+	// 而 Lstat/ReadDir 会跟随中间段读到盘符之外。解析真实路径后再校验一次包含性。
+	realContainer, err := filepath.EvalSymlinks(filepath.FromSlash(container))
+	if err != nil {
+		return BrowseResult{}, fmt.Errorf("cannot resolve real path of %s: %w", hostPath, err)
+	}
+	realBase, err := filepath.EvalSymlinks(filepath.FromSlash(base))
+	if err != nil {
+		return BrowseResult{}, fmt.Errorf("cannot resolve allowed root %s: %w", base, err)
+	}
+	if !underRoot(containerStyle(realContainer), containerStyle(realBase)) {
+		return BrowseResult{}, fmt.Errorf("path escapes the allowed root (%s): %s", base, hostPath)
+	}
+
 	res.Path, err = HostPathFromContainer(cfg, container)
 	if err != nil {
 		return BrowseResult{}, err
@@ -82,9 +100,11 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 		return BrowseResult{}, err
 	}
 	for _, e := range ents {
-		// 只列目录；符号链接一律跳过——它可能指向允许根之外，跟随会让
-		// "限定在已绑定盘符内"的约束失效。Windows 上目录 symlink 的 IsDir()
-		// 仍为 true，所以 ModeSymlink 检查必须显式写出来。
+		// 只列目录，不列文件；符号链接/junction 一律跳过——它可能指向允许根
+		// 之外，跟随会让"限定在已绑定盘符内"的约束失效。
+		// Go ≥ 1.23 在 Windows 上目录 symlink 与 junction 都报 IsDir()==false
+		// （junction 报 ModeIrregular，且不带 ModeSymlink），所以这里实际起作用
+		// 的是 !e.IsDir()；ModeSymlink 分支只是纵深防御，不依赖平台行为。
 		if !e.IsDir() || e.Type()&os.ModeSymlink != 0 {
 			continue
 		}
