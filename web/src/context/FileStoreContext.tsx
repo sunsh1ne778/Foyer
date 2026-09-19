@@ -148,9 +148,17 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [selectedNode, setSelectedNode] = useState<FSNode | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [deepSearch, setDeepSearch] = useState<DeepSearchState>(EMPTY_DEEP_SEARCH);
-  // 待揭示的目标：置上后由下一次「匹配到那个目录」的目录加载消费并选中该行。
+  // 待揭示的目标：置上后由揭示消费 effect 选中该行。
   // 必须带 mount/parent 一起记：否则在途的旧目录请求会把关键词提前吃掉。
   const pendingReveal = useRef<{ mount: string; parent: string; key: string } | null>(null);
+  // nodes 当前属于哪个目录（由产出它们的那次请求的闭包值写入）。
+  // 揭示消费用它判断 nodes 是否是「目标那一层」的条目——这保留了原来
+  // refreshDirectory 闭包内 mountName/currentPath 的守卫语义，避免在途的
+  // 旧目录（甚至别的挂载）请求用同名 key 把揭示提前吃掉。
+  const nodesOwnerRef = useRef<{ mount: string; path: string } | null>(null);
+  // 揭示计数器：目标目录已经是当前目录时 navigateTo 不改变 state（React 会 bail out），
+  // 靠它强制一次渲染，让揭示消费 effect 仍然被触发。
+  const [revealTick, setRevealTick] = useState(0);
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
@@ -205,6 +213,7 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const mountName = currentMount;
     if (!mountName) {
       setNodes([]);
+      nodesOwnerRef.current = null;
       return;
     }
     const mountObj = mountsRef.current.find(m => m.name === mountName);
@@ -215,20 +224,13 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const p = api.joinRef(mountName, currentPath);
       const data = await api.listFiles(p);
       const entries = (data.entries || []).map(e => mapListEntry(e, mountObj));
+      nodesOwnerRef.current = { mount: mountName, path: currentPath };
       setNodes(entries);
       setSelectedNode(prev => {
         if (!prev) return null;
         const hit = entries.find(n => n.key === prev.key);
         return hit || null;
       });
-      // 揭示（revealHit）只应在「目标所在的那一层」生效：在途的旧目录请求
-      // 也会走到这里，不带 mount/parent 校验就会把待揭示状态提前吃掉。
-      const reveal = pendingReveal.current;
-      if (reveal && reveal.mount === mountName && reveal.parent === currentPath) {
-        pendingReveal.current = null;
-        const hit = entries.find(n => n.key === reveal.key);
-        if (hit) setSelectedNode(hit);
-      }
     } catch (err) {
       reportError(err);
     } finally {
@@ -321,6 +323,23 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     void refreshDirectory();
   }, [isAuthenticated, currentMount, currentPath, refreshDirectory]);
 
+  // 揭示的唯一消费点。deps 同时覆盖两条路径：
+  // - 目标目录不是当前目录：navigateTo 改了路径，目录加载回填 nodes 后本 effect 命中；
+  // - 目标目录已经是当前目录：navigateTo 不产生新渲染，revealTick 强制本 effect 命中。
+  // 守卫用 nodesOwnerRef（产出 nodes 的那次请求的闭包值），在途的旧目录请求
+  // 无法用同名 key 提前消费；同时仍要求用户当前就停在目标目录。
+  useEffect(() => {
+    const reveal = pendingReveal.current;
+    if (!reveal) return;
+    const owner = nodesOwnerRef.current;
+    if (!owner || owner.mount !== reveal.mount || owner.path !== reveal.parent) return;
+    if (reveal.mount !== currentMount || reveal.parent !== currentPath) return;
+    const hit = nodes.find(n => n.key === reveal.key);
+    if (!hit) return;
+    pendingReveal.current = null;
+    setSelectedNode(hit);
+  }, [revealTick, nodes, currentMount, currentPath]);
+
   useEffect(() => {
     setPathInput(currentMount ? `${currentMount}:${currentPath}` : '');
     setSelectedKeys(new Set());
@@ -347,6 +366,7 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setCurrentMount('');
     setSelectedNode(null);
     pendingReveal.current = null;
+    nodesOwnerRef.current = null;
     setDeepSearch(EMPTY_DEEP_SEARCH);
     pollTimers.current.forEach(t => clearInterval(t));
     pollTimers.current.clear();
@@ -429,6 +449,8 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const revealHit = useCallback(
     (hit: SearchHit) => {
       pendingReveal.current = { mount: hit.mount, parent: parentKey(hit.key), key: hit.key };
+      // 目标目录若已是当前目录，下面 navigateTo 不会改变 state；这个计数保证揭示 effect 仍会跑。
+      setRevealTick(t => t + 1);
       setDeepSearch(EMPTY_DEEP_SEARCH);
       navigateTo(hit.mount, parentKey(hit.key));
     },
