@@ -1,7 +1,7 @@
 # 挂载本地目录时选择目录 设计
 
 日期：2026-09-19
-状态：待评审
+状态：已确认（2026-09-19）
 
 ## 问题
 
@@ -55,15 +55,14 @@ GET /foyer/browse?path=G:\20260619\#整理完成
   "drives": ["C:\\", "G:\\"],
   "entries": [
     { "name": "已归档", "path": "G:\\20260619\\#整理完成\\已归档", "mtime": "2026-06-19T02:00:00.000Z" }
-  ],
-  "truncated": false
+  ]
 }
 ```
 
 盘符列表层级（`path` 省略时）：
 
 ```json
-{ "ok": true, "path": "", "parent": "", "drives": ["C:\\", "G:\\"], "entries": [], "truncated": false }
+{ "ok": true, "path": "", "parent": "", "drives": ["C:\\", "G:\\"], "entries": [] }
 ```
 
 ### 字段
@@ -77,7 +76,6 @@ GET /foyer/browse?path=G:\20260619\#整理完成
 | `entries[].name` | 目录名 |
 | `entries[].path` | 该子目录的宿主机完整路径，前端直接使用（前端不做路径拼接） |
 | `entries[].mtime` | ISO-8601 UTC，best-effort；取不到则省略。用于同名目录消歧 |
-| `truncated` | `entries` 因上限被截断时为 `true`，上限 1000 |
 
 ### 规则
 
@@ -151,7 +149,7 @@ GET /foyer/browse?path=G:\20260619\#整理完成
 Go（`server/internal/foyer/`）：
 
 - `HostPathFromContainer` 表驱动往返测试：盘符根、多级、`#`、中文、空格；`HostData` 形式；非法输入报错。
-- `Browse` 单元测试（`t.TempDir()` 当假盘符 base）：只列目录不列文件、排序确定性、符号链接被跳过、`truncated` 在超 1000 时置位。
+- `Browse` 单元测试（`t.TempDir()` 当假盘符 base）：只列目录不列文件、排序确定性、符号链接被跳过、`mtime` 可取到时输出 ISO 串、目录含大量子目录时全部返回（不设上限）。
 - `Browse` 越界：`/etc`、`/mnt/g/../../etc`、指向外部目录的链接，均报错。
 - 路由测试：`GET /foyer/browse` 无参返回盘符列表；带 `path` 返回 `entries`/`parent`；越界返回 400。
 
@@ -175,7 +173,10 @@ Go（`server/internal/foyer/`）：
 
 `/foyer/browse` 会暴露宿主机目录**名字**（只读，且限定在已绑定盘符内）。这与现有信任模型一致：`/foyer/import` 本来就接受任意宿主机路径并真的去读它。`deploy/compose.yml` 里 `8092:8092` 当前对外可达。本次不改绑定，评审时可决定是否收紧为 `127.0.0.1:8092:8092`。
 
-## 待评审确认
+## 已确认的决定
 
-1. `entries` 上限 1000 是否合适（或用「只显示前 N 个 + 提示手填」）。
-2. `entries[].mtime` 是否保留——它让后端多一次 `Info()`，但能帮用户在大量同名目录里消歧。
+1. **不设条目上限**——`entries` 返回当前目录全部子目录。实现上仍应避免在无谓的地方重复 `Info()`。
+2. **保留 `entries[].mtime`**——用 `DirEntry.Info()` 逐项取，可帮用户在大量同名目录里消歧。这是有意的性能取舍：Docker Desktop 的盘符绑定挂载上每项一次 stat，目录很大时会变慢。
+3. **交互为单击即进入**（无「选中」态，当前目录即选中项）。
+4. **本期只覆盖新增挂载弹窗**。
+5. **不改 `8092` 端口绑定**——刻意留白，见风险。
