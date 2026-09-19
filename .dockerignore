@@ -6,6 +6,8 @@
 !overlays/
 !overlays/juicefs/
 !overlays/juicefs/**
+!scripts/
+!scripts/apply-juicefs-overlay.sh
 !server/
 !server/**
 

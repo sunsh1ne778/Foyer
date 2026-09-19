@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import * as api from '../api/client';
+import type { FoyerImportResult } from '../api/jfs';
 import { mapJob, mapListEntry, mapMount } from '../api/mappers';
 import {
   Mount,
@@ -85,6 +86,8 @@ interface FileStoreContextType {
   removeMount: (id: string) => Promise<void>;
   probeMount: (id: string) => Promise<boolean>;
   triggerReconcile: (mountName: string) => Promise<void>;
+  previewLocalImport: (name: string, root: string) => Promise<FoyerImportResult>;
+  resyncMount: (id: string) => Promise<FoyerImportResult>;
   updateNodeOverlay: (mountName: string, key: string, tags: string[], custom: Record<string, string>) => void;
   cancelJob: (jobId: string) => void;
   retryJob: (jobId: string) => void;
@@ -507,6 +510,22 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const previewLocalImport = async (name: string, root: string) => {
+    return api.previewLocalImport(name, root);
+  };
+
+  const resyncMount = async (id: string) => {
+    try {
+      const res = await api.resyncMount(id);
+      await refreshMounts();
+      await refreshDirectory();
+      return res;
+    } catch (err) {
+      reportError(err);
+      throw err;
+    }
+  };
+
   const downloadNode = async (node: FSNode) => {
     if (node.is_dir) return;
     const p = api.joinRef(node.mount_name, node.key);
@@ -598,6 +617,8 @@ export const FileStoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         removeMount,
         probeMount,
         triggerReconcile,
+        previewLocalImport,
+        resyncMount,
         updateNodeOverlay,
         cancelJob,
         retryJob,

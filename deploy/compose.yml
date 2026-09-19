@@ -82,8 +82,13 @@ services:
       FOYER_ADMIN_LISTEN: ":8092"
       FOYER_VOLUME: foyer
       FOYER_JUICEFS_BIN: /usr/local/bin/juicefs
+      FOYER_HOST_MOUNT: /host
+      FOYER_HOST_DATA: ${FOYER_HOST_DATA:-}
+      FOYER_MOUNTS_FILE: /var/lib/foyer/mounts.json
       MINIO_ROOT_USER: foyerak
       MINIO_ROOT_PASSWORD: foyersecret
+    volumes:
+      - foyer-admin:/var/lib/foyer
     depends_on:
       redis:
         condition: service_healthy
@@ -168,3 +173,4 @@ volumes:
   pg-data:
   redis-data:
   rustfs-data:
+  foyer-admin:

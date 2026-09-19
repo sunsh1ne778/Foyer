@@ -50,8 +50,8 @@ export function mapListEntry(entry: api.ListEntry, mount: Mount): FSNode {
     is_dir: entry.is_dir,
     size: entry.size ?? 0,
     etag: entry.etag,
-    mtime: entry.mtime || new Date().toISOString(),
-    updated_at: entry.mtime || new Date().toISOString(),
+    mtime: entry.mtime || '',
+    updated_at: entry.mtime || '',
     tags: [],
     custom_meta: {},
   };

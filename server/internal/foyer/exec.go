@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 type Runner struct {
@@ -45,7 +46,7 @@ func (r Runner) Status(metaURL string) error {
 
 func (r Runner) Format(cfg Config) error {
 	if err := r.cmd(FormatArgs(cfg)...).Run(); err != nil {
-		return fmt.Errorf("juicefs format: %w", err)
+		return fmt.Errorf("juicefs format: %w (if Redis was reset, empty object bucket %s then retry)", err, cfg.Bucket)
 	}
 	return nil
 }
@@ -55,6 +56,51 @@ func (r Runner) Gateway(cfg Config) error {
 		return fmt.Errorf("juicefs gateway: %w", err)
 	}
 	return nil
+}
+
+func (r Runner) Import(cfg Config, src, dest string, dryRun bool) (ImportResult, error) {
+	c := r.cmd(ImportArgs(cfg, src, dest, dryRun)...)
+	c.Stdout = nil
+	c.Stderr = nil
+	out, err := c.CombinedOutput()
+	text := string(out)
+	if err != nil {
+		if msg := strings.TrimSpace(text); msg != "" {
+			return ImportResult{}, fmt.Errorf("juicefs import: %s", lastLine(msg))
+		}
+		return ImportResult{}, fmt.Errorf("juicefs import: %w", err)
+	}
+	res, perr := parseImportSummary(text)
+	if perr != nil {
+		return ImportResult{}, fmt.Errorf("juicefs import: %w", perr)
+	}
+	return res, nil
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+// Stat reads metadata for one or more paths in a single juicefs invocation.
+// Read-only.
+func (r Runner) Stat(cfg Config, paths []string) ([]StatResult, error) {
+	c := r.cmd(StatArgs(cfg, paths)...)
+	c.Stdout = nil
+	c.Stderr = nil
+	out, err := c.CombinedOutput()
+	text := string(out)
+	if err != nil {
+		if msg := strings.TrimSpace(text); msg != "" {
+			return nil, fmt.Errorf("juicefs stat: %s", lastLine(msg))
+		}
+		return nil, fmt.Errorf("juicefs stat: %w", err)
+	}
+	res, perr := parseStatResults(text)
+	if perr != nil {
+		return nil, fmt.Errorf("juicefs stat: %w", perr)
+	}
+	return res, nil
 }
 
 func (r Runner) EnsureVolume(cfg Config) error {

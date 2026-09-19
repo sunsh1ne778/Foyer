@@ -3,10 +3,14 @@ FROM golang:1.23-bookworm AS build
 ENV GOPROXY=https://goproxy.cn,direct
 WORKDIR /src
 COPY third_party/juicefs /src/juicefs
-COPY overlays/juicefs/pkg/object/fastdfs.go /src/juicefs/pkg/object/fastdfs.go
+COPY overlays/juicefs /tmp/overlays/juicefs
+COPY scripts/apply-juicefs-overlay.sh /tmp/apply-juicefs-overlay.sh
+WORKDIR /src
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libfuse3-dev python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's/\r$//' /tmp/apply-juicefs-overlay.sh \
+    && sh /tmp/apply-juicefs-overlay.sh /tmp/overlays/juicefs /src/juicefs
 WORKDIR /src/juicefs
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libfuse3-dev \
-    && rm -rf /var/lib/apt/lists/*
 ENV CGO_ENABLED=1
 RUN go build -o /out/juicefs .
 

@@ -4,8 +4,8 @@ import { useFileStore } from '../context/FileStoreContext';
 
 export const LoginScreen: React.FC = () => {
   const { login, authError } = useFileStore();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('foyerak');
+  const [password, setPassword] = useState('foyersecret');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
 
@@ -33,8 +33,8 @@ export const LoginScreen: React.FC = () => {
               <FolderTree className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold tracking-tight">FileStore 控制台</h1>
-              <p className="text-indigo-100 text-xs mt-0.5">通过 OpenAPI /v1 连接后端</p>
+              <h1 className="text-lg font-semibold tracking-tight">Foyer 控制台</h1>
+              <p className="text-indigo-100 text-xs mt-0.5">通过 JuiceFS S3 Gateway 连接卷 foyer</p>
             </div>
           </div>
         </div>
@@ -48,7 +48,7 @@ export const LoginScreen: React.FC = () => {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-700">用户名</label>
+            <label className="text-xs font-medium text-slate-700">Access Key</label>
             <input
               type="text"
               autoComplete="username"
@@ -59,7 +59,7 @@ export const LoginScreen: React.FC = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-700">密码</label>
+            <label className="text-xs font-medium text-slate-700">Secret Key</label>
             <input
               type="password"
               autoComplete="current-password"
@@ -70,8 +70,9 @@ export const LoginScreen: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-slate-500">
-            默认账号见 <code className="font-mono text-indigo-600">configs/server.yml</code> 与{' '}
-            <code className="font-mono">FILESTORE_ADMIN_PASSWORD</code>（常见为 admin / changeme）。
+            与 compose 中 <code className="font-mono text-indigo-600">MINIO_ROOT_USER</code> /{' '}
+            <code className="font-mono">MINIO_ROOT_PASSWORD</code> 相同（默认 foyerak / foyersecret）。先起{' '}
+            <code className="font-mono">.\\scripts\\run-foyer.ps1</code>。
           </p>
 
           <button

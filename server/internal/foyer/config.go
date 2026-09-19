@@ -14,6 +14,9 @@ type Config struct {
 	JuiceFSBin      string
 	GatewayRootUser string
 	GatewayRootPass string
+	HostData        string
+	HostMount       string
+	MountsFile      string
 }
 
 func envOr(key, def string) string {
@@ -36,5 +39,8 @@ func LoadConfig() Config {
 		JuiceFSBin:      envOr("FOYER_JUICEFS_BIN", "juicefs"),
 		GatewayRootUser: envOr("MINIO_ROOT_USER", "foyerak"),
 		GatewayRootPass: envOr("MINIO_ROOT_PASSWORD", "foyersecret"),
+		HostData:        envOr("FOYER_HOST_DATA", ""),
+		HostMount:       envOr("FOYER_HOST_MOUNT", "/host"),
+		MountsFile:      envOr("FOYER_MOUNTS_FILE", "/var/lib/foyer/mounts.json"),
 	}
 }

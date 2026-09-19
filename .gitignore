@@ -21,3 +21,7 @@ console/node_modules/
 console/dist/
 legacy/web/node_modules/
 legacy/web/dist/
+deploy/compose.host-drives.yml
+
+# Local scratch for verification runs (overlay A/B, docker test scripts, logs)
+.tmp-test/

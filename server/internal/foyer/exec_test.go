@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,10 @@ func TestFormatAndGatewayArgs(t *testing.T) {
 	if len(ga) != 3 || ga[0] != "gateway" || ga[2] != "0.0.0.0:9002" {
 		t.Fatalf("%v", ga)
 	}
+	ia := strings.Join(ImportArgs(cfg, "file:///data/in", "/photos", false), " ")
+	if ia != "import --json redis://redis:6379/1 file:///data/in /photos" {
+		t.Fatal(ia)
+	}
 }
 
 func writeFakeJuice(t *testing.T, statusOK bool) string {
@@ -40,6 +45,8 @@ func writeFakeJuice(t *testing.T, statusOK bool) string {
 		script += "if [ \"$1\" = status ]; then exit 1; fi\n"
 	}
 	script += "if [ \"$1\" = format ]; then echo FORMAT \"$@\" > \"$(dirname \"$0\")/out.txt\"; exit 0; fi\n"
+	script += "if [ \"$1\" = import ]; then printf '%s\\n' '{\"dry_run\":false,\"dest\":\"/photos\",\"scanned\":2,\"imported\":1,\"skipped\":1,\"mtime_kept\":1,\"mtime_missing\":0,\"mode_kept\":1,\"owner_kept\":0,\"dir_mtime_kept\":0}'; exit 0; fi\n"
+	script += "if [ \"$1\" = stat ]; then shift 2; for p in \"$@\"; do printf '{\"path\":\"%s\",\"inode\":42,\"type\":\"directory\",\"mode\":493,\"uid\":0,\"gid\":0,\"size\":4096,\"nlink\":3,\"mtime\":1777690800,\"mtimensec\":123456789}\\n' \"$p\"; done; exit 0; fi\n"
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +78,14 @@ func main() {
 	case "format":
 		out := filepath.Join(filepath.Dir(os.Args[0]), "out.txt")
 		_ = os.WriteFile(out, []byte("FORMAT "+strings.Join(os.Args[1:], " ")), 0644)
+		os.Exit(0)
+	case "import":
+		fmt.Println("{\"dry_run\":false,\"dest\":\"/photos\",\"scanned\":2,\"imported\":1,\"skipped\":1,\"mtime_kept\":1,\"mtime_missing\":0,\"mode_kept\":1,\"owner_kept\":0,\"dir_mtime_kept\":0}")
+		os.Exit(0)
+	case "stat":
+		for _, p := range os.Args[3:] {
+			fmt.Printf("{\"path\":\"%s\",\"inode\":42,\"type\":\"directory\",\"mode\":493,\"uid\":0,\"gid\":0,\"size\":4096,\"nlink\":3,\"mtime\":1777690800,\"mtimensec\":123456789}\n", p)
+		}
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown: %s\n", os.Args[1])
@@ -124,4 +139,75 @@ func TestRunnerUsesConfiguredBin(t *testing.T) {
 	if err := r.Status("redis://x"); err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+func TestImportParsesSummary(t *testing.T) {
+	bin := writeFakeJuice(t, true)
+	r := Runner{Bin: bin}
+	res, err := r.Import(Config{MetaURL: "redis://x"}, "file:///host/", "/photos", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Imported != 1 || res.Skipped != 1 || res.Scanned != 2 {
+		t.Fatalf("%+v", res)
+	}
+	if res.MtimeKept != 1 || res.MtimeMissing != 0 || res.ModeKept != 1 || res.OwnerKept != 0 || res.DirMtimeKept != 0 {
+		t.Fatalf("fidelity not passed through: %+v", res)
+	}
+}
+
+func TestImportReportsNonZeroExit(t *testing.T) {
+	bin := writeFakeImport(t, "FATAL: bucket missing", 1)
+	r := Runner{Bin: bin}
+	_, err := r.Import(Config{MetaURL: "redis://x"}, "file:///host/", "/photos", false)
+	if err == nil || !strings.Contains(err.Error(), "bucket missing") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestImportRejectsOutputWithoutSummary(t *testing.T) {
+	bin := writeFakeImport(t, "imported 0, skipped 0, scanned 0 -> /photos", 0)
+	r := Runner{Bin: bin}
+	_, err := r.Import(Config{MetaURL: "redis://x"}, "file:///host/", "/photos", false)
+	if err == nil || !strings.Contains(err.Error(), "no JSON summary") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func writeFakeImport(t *testing.T, stdout string, code int) string {
+	t.Helper()
+	// stdout 必须是不含引号的单行文本：Windows 分支把它内联进 Go 源码，
+	// POSIX 分支把它内联进 shell 单引号。需要回显 JSON 的场景请用 writeFakeJuice。
+	dir := t.TempDir()
+	if runtime.GOOS != "windows" {
+		path := filepath.Join(dir, "juicefs")
+		script := "#!/bin/sh\nprintf '%s\\n' '" + stdout + "'\nexit " + strconv.Itoa(code) + "\n"
+		if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	src := `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Println("` + stdout + `")
+	os.Exit(` + strconv.Itoa(code) + `)
+}
+`
+	srcPath := filepath.Join(dir, "fakejuice.go")
+	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "juicefs.exe")
+	cmd := exec.Command("go", "build", "-o", out, srcPath)
+	cmd.Dir = dir
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build fake juicefs: %v\n%s", err, b)
+	}
+	return out
 }

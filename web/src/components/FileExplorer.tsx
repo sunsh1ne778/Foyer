@@ -28,6 +28,12 @@ import { useFileStore } from '../context/FileStoreContext';
 import { FSNode } from '../types';
 import { formatBytes, formatDate, getFileExtension } from '../utils/formatters';
 
+/** 空字符串/非法时间按 0（最旧）处理，供 mtime 排序使用。 */
+function timeOf(value: string): number {
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
 export const FileExplorer: React.FC = () => {
   const {
     currentMount,
@@ -86,7 +92,9 @@ export const FileExplorer: React.FC = () => {
     } else if (sortField === 'size') {
       comparison = a.size - b.size;
     } else if (sortField === 'mtime') {
-      comparison = new Date(a.mtime).getTime() - new Date(b.mtime).getTime();
+      // 目录时间可能未知（S3 列表拿不到、控制面读取失败），按最旧处理，
+      // 避免 NaN 让排序结果不稳定。
+      comparison = timeOf(a.mtime) - timeOf(b.mtime);
     }
     return sortAsc ? comparison : -comparison;
   });
