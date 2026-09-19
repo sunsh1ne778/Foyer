@@ -572,3 +572,42 @@ Task 8: complete with one unverifiable item (commit b0d947f 之后，本任务�
     （含「停在目标目录再跳转」这条最容易复现 bug 的场景）。
   观察（非缺陷）：卷内存在上一轮导入实验留下的孤立目录（`/20260619/#整理完成`、`/gav/#整理完成`），
     无对应 dest，按设计落卷挂载 `foyer`；`/foyer/usage` 不带 `path` 时 `summaries` 恒为 `[]`（按设计）。
+
+Final review (整支, base 802fb26 → 9dd3191, 17 commits, 评审包 `.superpowers/sdd/search-final-review.diff`):
+  Ready to merge? **With fixes** → 两项均在本轮关闭。无 Critical。
+  Strengths：overlay 的 `.`/`..`/回收站/symlink 三处跳过都有鉴别力测试（symlink 用例特意在链接下种了
+  含关键词的子项，并靠 EIO-on-second-visit 把「漏跳」变成明确失败而不是挂住）；JSON 契约在**生产者**与
+  **HTTP 边界**两侧分别钉住（含 `errors` 的「缺席 vs 空数组」）；前端纯函数在段边界/最长前缀/卷挂载兜底
+  上正确，且 reviewer 独立核对 `mergeMounts` 总会插入隐式卷挂载、`mapMount` 保留 `spec.dest`，证明 `/`
+  兜底在真实数据路径上成立（与我在 Task 8 探针里踩到并订正的那点一致）；揭示机制的两个守卫与
+  `revealTick` 经逐态推演无误；`handleDragOver` 去高亮是真修而非美化。测试：Go `ok`、web 133/133、
+  `tsc`/`vet` 干净。
+  Important 1（**已修**，commit `9dd3191`）：`pendingReveal` 在「目标目录已加载、但本层 `nodes` 里没有
+    该 key」时永不清空 → 日后手动进入同一路径会被自动选中，违反 spec 的「避免悬挂」。
+    ⚠️ 但计划文本（controller 自己写的，任务 6 Step 3）**明文要求「`!hit` 时故意不清空」**，与 spec
+    直接冲突 —— 按流程这属计划级矛盾，**交用户裁决**而非自行修。
+    查证计划当年的理由成立且**可达**：`listPrefix`（`web/src/api/jfs.ts:133-173`）只发一次
+    `ListObjectsV2`、没有 continuation-token 循环 ⇒ 单目录列表上限 1000 条，而本卷 `/av_20260619` 已
+    800 条（578 文件 + 222 目录）⇒ 目标层未命中不能推出「目标已不在」，清空会让跳转静默失效。
+    用户裁决：**折中（限定生命周期）** —— 目标层未命中时继续上膛（容忍截断列表），但用户一旦导航离开
+    目标目录即清空。实现：新增封口 effect（`FileStoreContext.tsx:343-353`，deps `[currentMount,
+    currentPath]`），声明在消费 effect 之后（同一次 commit 内消费先跑）；消费 effect 与 `!hit` 早退
+    **未动**。计划 Task 6 Step 3 与 spec:170 已同步改写为「限定生命周期」口径（三方一致）。
+    ⚠️ 此改动**无自动化覆盖**（context 层无 DOM 设施）：结论来自 `tsc --noEmit` + 阅读 + 四序列推演。
+  Important 2（用户决定**跳过**，如实收尾）：交互/渲染层（`SearchResults` 渲染、`FileExplorer` 列表区域
+    切换、跳转选中、拖放去高亮、返回目录）**从未执行过**：本会话无任何浏览器类工具，仓库 vitest 为
+    node 环境且只 include `*.test.ts`。计划里已留 7 步人工核对清单，用户选择不跑。
+  Minors 分诊：reviewer 判定 **must-fix-before-merge 为零**，全部为后续项。分组：
+    - 缺覆盖三处：`envUint64` 无单测、`Config.SearchMaxResults → run.Search` 这一跳从未以非零值跑过、
+      前端 `errors` 键无断言。
+    - 空 `--name` 未拒（spec 字面偏差「空值报错」，`cli.Required` 只管存在性）：HTTP 侧已有 400 兜住，
+      仅直接 CLI 调用可触发，但会整卷遍历并匹配全部条目。
+    - `truncated` 在命中数恰等于 limit 时过度上报（设计字面如此，纯展示）。
+    - PowerShell `[regex]::Replace($m,$pat,$repl,1)` 第 4 参数是 `RegexOptions.IgnoreCase` 而非次数
+      （替换全部）；`.sh` 侧用的是 `re.subn(count=1)`，**两个脚本行为其实不同**，靠 hook site 唯一 + 守卫兜住。
+    - `errors` 服务端与 `foyerSearch` 都透传了，但**没有任何 UI 读它**：子树读取失败时用户只看到
+      `scanned` 偏小，没有「N 个子目录读取失败」提示。
+    - 等长 dest 平局按列表顺序裁决；`runDeepSearch` 无请求序号（连点两次可能旧响应覆盖新的）。
+    - 既存（非本次引入）：`refreshDirectory` 无请求版本号，慢的旧响应可能覆盖 `nodes` 并丢掉已揭示的选中。
+    - UI 打磨：跳转按钮在「已在目标目录」时无 disabled/loading；翻页不复位滚动位置。
+    - `PATH=/.trash` 作为根可绕过回收站跳过（只过滤枚举出的条目，不过滤根本身）；前端永远用 `/`，不可达。
