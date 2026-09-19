@@ -419,7 +419,9 @@ export async function foyerBrowse(path?: string): Promise<FoyerBrowseResult> {
   }
   const data = (await res.json()) as Partial<FoyerBrowseResult>;
   return {
-    ok: data.ok ?? true,
+    // 失败关闭：响应体显式说 ok:false 时绝不能当成功。当前无调用方读 ok，
+    // 但类型暴露给未来消费者，默认 true 会把 false 静默吞掉。
+    ok: data.ok ?? false,
     path: data.path || '',
     parent: data.parent || '',
     drives: data.drives || [],

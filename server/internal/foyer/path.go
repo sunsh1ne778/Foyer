@@ -109,7 +109,7 @@ func FileURI(containerPath string) string {
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
-// DetectHostDrives 列出已绑定进容器的盘符，形如 "C:\\"。base 为绑定根（生产是 /mnt）。
+// DetectHostDrives 列出已绑定进容器的盘符，形如 "C:\"。base 为绑定根（生产是 /mnt）。
 func DetectHostDrives(base string) []string {
 	if base == "" {
 		base = "/mnt"

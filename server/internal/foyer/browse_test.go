@@ -1,14 +1,17 @@
 package foyer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +142,47 @@ func TestBrowseRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+// Windows 上 os.Symlink 需要特权，但 junction（mklink /J）不需要。这里用 junction
+// 复现 TestBrowseRejectsSymlinkEscape 的两个断言，补上该防护在 Windows 上没有
+// 可执行回归测试的空白。Linux 上另有 os.Symlink 版本真正执行。
+func TestBrowseRejectsJunctionEscapeWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skipf("junction test only applies to windows (GOOS=%s)", runtime.GOOS)
+	}
+	cfg, drive := fakeDriveEnv(t)
+	outside := filepath.Join(t.TempDir(), "outside")
+	mustMkdir(t, filepath.ToSlash(outside))
+	mustMkdir(t, filepath.Join(outside, "sub"))
+	link := filepath.Join(drive, "link")
+
+	// mklink 是 cmd 内建：成功时退出码 0、信息写 stdout；失败时退出码非 0、信息写
+	// stderr。退出码与 stderr 都必须检查，否则 cmd 不可用或卷不支持 junction 时会
+	// 误以为是防护生效。两者任一异常就 skip，绝不假装通过。
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, outside)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil || stderr.Len() > 0 {
+		t.Skipf("mklink /J unavailable: err=%v stderr=%q", err, strings.TrimSpace(stderr.String()))
+	}
+
+	// 确认 junction 真的建起来并解析到根外：否则下面两个断言会因"路径不存在"
+	// 而虚假通过，测试就失去意义。
+	if _, err := os.Stat(filepath.Join(link, "sub")); err != nil {
+		t.Skipf("junction not resolvable, cannot exercise the guard: %v", err)
+	}
+
+	// 链接本身必须被拒（Windows 上 junction 的 Lstat 不带 ModeSymlink，实际由
+	// IsDir() / 解析真实路径后的包含性校验拦下，但断言与符号链接版本完全一致）。
+	if res, err := Browse(cfg, `G:\link`); err == nil {
+		t.Fatalf("junction itself must be rejected, got %+v", res)
+	}
+	// 穿过 junction 的子路径词法上仍在根内，但真实路径在根外，必须被拒。
+	if res, err := Browse(cfg, `G:\link\sub`); err == nil {
+		t.Fatalf("path traversing a junction out of the root must be rejected, got %+v", res)
+	}
+}
+
 func TestBrowseReturnsAllSubdirs(t *testing.T) {
 	cfg, drive := fakeDriveEnv(t)
 	const n = 60
@@ -166,7 +210,8 @@ func TestBrowseRejectsEscape(t *testing.T) {
 			t.Fatalf("%q should be rejected, got %+v", bad, res)
 		}
 	}
-	// 未绑定的盘符会映射到绑定根下的空目录。
+	// Z 未绑定：MapHostPath 仍把它映射到 <base>/z/nope，但该目录不存在，所以报错。
+	// 这里断言的是"绑定根下未知盘符路径不存在"，不是"映射到空目录"。
 	if _, err := Browse(cfg, `Z:\nope`); err == nil {
 		t.Fatal("unbound drive should fail")
 	}
@@ -209,9 +254,29 @@ func TestBrowseRoute(t *testing.T) {
 		t.Fatalf("escape must 400, got %d", rr.Code)
 	}
 
+	// 「不存在」是请求路径的属性，归客户端错误：400。
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/browse?path="+url.QueryEscape(`Z:\nope`), nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing directory must 400, got %d body %s", rr.Code, rr.Body.String())
+	}
+
+	// 非 ErrBrowseBadPath 的错误必须 500，而不是被压成 400。这里用绑定根下
+	// 反向映射失败的路径触发（与 os.ReadDir/权限失败走同一分支）。
+	base := hostMountBase(cfg)
+	mustMkdir(t, path.Join(base, "zz"))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/foyer/browse?path="+url.QueryEscape(base+"/zz"), nil))
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("internal error must 500, got %d body %s", rr.Code, rr.Body.String())
+	}
+
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/foyer/browse", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST must 405, got %d", rr.Code)
+	}
+	if allow := rr.Header().Get("Allow"); allow != "GET" {
+		t.Fatalf("405 must carry Allow: GET, got %q", allow)
 	}
 }

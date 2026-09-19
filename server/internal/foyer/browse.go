@@ -1,6 +1,7 @@
 package foyer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -9,6 +10,12 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrBrowseBadPath 标记由客户端请求内容导致的错误（越界、非目录、拒绝跟随链接、
+// 解析后逃逸绑定根、路径不存在、宿主路径无法映射）。HTTP 层据此区分 400 与 500：
+// 只有 errors.Is(err, ErrBrowseBadPath) 才是客户端错误，其余（如 os.ReadDir/权限
+// 失败）是服务端错误。
+var ErrBrowseBadPath = errors.New("browse: invalid path")
 
 // BrowseEntry 是目录选择器里的一行子目录。
 type BrowseEntry struct {
@@ -44,7 +51,9 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 
 	container, err := MapHostPath(cfg, hostPath)
 	if err != nil {
-		return BrowseResult{}, err
+		// 映射失败来自客户端给的路径本身（形态不对、不在 FOYER_HOST_DATA 下），
+		// 不是服务端故障；保持与改动前一致的 400，不能落到 500。
+		return BrowseResult{}, fmt.Errorf("%w: %v", ErrBrowseBadPath, err)
 	}
 	container = path.Clean(container)
 
@@ -53,21 +62,22 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 	// 两侧都过 containerStyle：base 由 env 配置，可能是 `//mnt`、`/mnt/.` 这类
 	// 未归一化的形状；container 在 Windows 上则可能没有前导斜杠。
 	if !underRoot(containerStyle(container), containerStyle(base)) {
-		return BrowseResult{}, fmt.Errorf("path is outside the allowed root (%s)", base)
+		return BrowseResult{}, fmt.Errorf("%w: path is outside the allowed root (%s)", ErrBrowseBadPath, base)
 	}
 
 	fi, err := os.Lstat(container)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return BrowseResult{}, fmt.Errorf("no such directory: %s", hostPath)
+			// 目标不存在是请求路径的属性（请求了一个不存在的目录），按客户端错误处理。
+			return BrowseResult{}, fmt.Errorf("%w: no such directory: %s", ErrBrowseBadPath, hostPath)
 		}
 		return BrowseResult{}, err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return BrowseResult{}, fmt.Errorf("refusing to follow symlink: %s", hostPath)
+		return BrowseResult{}, fmt.Errorf("%w: refusing to follow symlink: %s", ErrBrowseBadPath, hostPath)
 	}
 	if !fi.IsDir() {
-		return BrowseResult{}, fmt.Errorf("not a directory: %s", hostPath)
+		return BrowseResult{}, fmt.Errorf("%w: not a directory: %s", ErrBrowseBadPath, hostPath)
 	}
 
 	// 上面两步都不够：词法前缀比较只看字符串，Lstat 只对最后一段生效。若中间
@@ -82,7 +92,7 @@ func Browse(cfg Config, hostPath string) (BrowseResult, error) {
 		return BrowseResult{}, fmt.Errorf("cannot resolve allowed root %s: %w", base, err)
 	}
 	if !underRoot(containerStyle(realContainer), containerStyle(realBase)) {
-		return BrowseResult{}, fmt.Errorf("path escapes the allowed root (%s): %s", base, hostPath)
+		return BrowseResult{}, fmt.Errorf("%w: path escapes the allowed root (%s): %s", ErrBrowseBadPath, base, hostPath)
 	}
 
 	res.Path, err = HostPathFromContainer(cfg, container)

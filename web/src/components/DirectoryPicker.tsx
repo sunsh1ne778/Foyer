@@ -110,16 +110,18 @@ export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, 
           </button>
         </div>
 
-        {/* Nav：盘符列表层级没有路径可拆，面包屑整个不出现 */}
-        {path && (
+        {/* Nav：盘符列表层级没有路径可拆，面包屑整个不出现；加载失败时不渲染，
+            避免把上一个目录的面包屑/盘符留在屏幕上误导用户。 */}
+        {path && !error && (
           <div className="px-4 py-2 border-b border-slate-200 bg-white space-y-2">
             <div className="flex flex-wrap items-center gap-1">
               {drives.map(d => (
                 <button
                   key={d}
                   type="button"
+                  disabled={loading}
                   onClick={() => void load(d)}
-                  className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors ${
+                  className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentDrive === d
                       ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -132,8 +134,9 @@ export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, 
             <div className="flex items-center gap-1.5 text-[11px]">
               <button
                 type="button"
+                disabled={loading}
                 onClick={() => void load(data?.parent || '')}
-                className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+                className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="上级目录"
               >
                 <ArrowUp className="w-3.5 h-3.5" />
@@ -144,8 +147,9 @@ export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, 
                     {i > 0 && <ChevronRight className="w-3 h-3 text-slate-300" />}
                     <button
                       type="button"
+                      disabled={loading}
                       onClick={() => void load(c.value)}
-                      className="hover:text-indigo-600 hover:underline"
+                      className="hover:text-indigo-600 hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
                     >
                       {c.label}
                     </button>
@@ -229,7 +233,7 @@ export const DirectoryPicker: React.FC<Props> = ({ open, initialPath, onSelect, 
             </button>
             <button
               type="button"
-              disabled={!path || loading}
+              disabled={!path || loading || !!error}
               onClick={() => onSelect(path)}
               className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium shadow-xs transition-colors disabled:bg-slate-300"
             >

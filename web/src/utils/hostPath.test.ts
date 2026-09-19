@@ -19,6 +19,22 @@ describe('hostPathSegments', () => {
     ]);
   });
 
+  it('ignores a trailing separator (round-trips to the same values)', () => {
+    expect(hostPathSegments('G:\\20260619\\')).toEqual([
+      { label: 'G:\\', value: 'G:\\' },
+      { label: '20260619', value: 'G:\\20260619' },
+    ]);
+  });
+
+  it('accumulates paths deeper than two levels', () => {
+    expect(hostPathSegments('G:\\20260619\\#整理完成\\sub')).toEqual([
+      { label: 'G:\\', value: 'G:\\' },
+      { label: '20260619', value: 'G:\\20260619' },
+      { label: '#整理完成', value: 'G:\\20260619\\#整理完成' },
+      { label: 'sub', value: 'G:\\20260619\\#整理完成\\sub' },
+    ]);
+  });
+
   it('tolerates spaces in segment names', () => {
     const got = hostPathSegments('C:\\Program Files\\a');
     expect(got[1]).toEqual({ label: 'Program Files', value: 'C:\\Program Files' });

@@ -2,6 +2,7 @@ package foyer
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -84,12 +85,19 @@ func NewHealthMux(cfg Config) http.Handler {
 	})
 	mux.HandleFunc("/foyer/browse", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		res, err := Browse(cfg, r.URL.Query().Get("path"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			// 只有明确的客户端路径错误才是 400；os.ReadDir/权限/解析失败等
+			// 服务端故障必须报 500，不能被压成客户端错误。
+			code := http.StatusInternalServerError
+			if errors.Is(err, ErrBrowseBadPath) {
+				code = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), code)
 			return
 		}
 		writeJSON(w, http.StatusOK, res)

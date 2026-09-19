@@ -83,6 +83,9 @@ services:
       FOYER_VOLUME: foyer
       FOYER_JUICEFS_BIN: /usr/local/bin/juicefs
       FOYER_HOST_MOUNT: /host
+      # 盘符绑定根：scripts/gen-host-drives.ps1 把 G:/ 挂成 /mnt/g，目录选择器
+      # 在此根下列出 <letter> 子目录当盘符。默认 /mnt，须与生成的挂载点一致。
+      FOYER_HOST_MOUNT_BASE: /mnt
       FOYER_HOST_DATA: ${FOYER_HOST_DATA:-}
       FOYER_MOUNTS_FILE: /var/lib/foyer/mounts.json
       MINIO_ROOT_USER: foyerak

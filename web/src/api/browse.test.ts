@@ -9,7 +9,9 @@ function stubFetch(payload: unknown, ok = true): string[] {
       ok,
       status: ok ? 200 : 400,
       json: async () => payload,
-      text: async () => JSON.stringify(payload),
+      // 失败响应体是 Go http.Error 发出的纯文本，不是 JSON：字符串原样返回，
+      // 才能证明服务端原始消息被透传出来。
+      text: async () => (typeof payload === 'string' ? payload : JSON.stringify(payload)),
     };
   });
   return calls;
@@ -34,8 +36,10 @@ describe('foyerBrowse', () => {
   });
 
   it('defaults missing collections instead of throwing', async () => {
-    stubFetch({ ok: true });
+    const calls = stubFetch({ ok: true });
     const res = await foyerBrowse('');
+    // 空串等价于"只列盘符"：绝不能带 path 参数（否则会被服务端当成空路径）。
+    expect(calls[0]).toBe('/foyer/browse');
     expect(res.entries).toEqual([]);
     expect(res.drives).toEqual([]);
     expect(res.path).toBe('');
