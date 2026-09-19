@@ -128,8 +128,13 @@ func pathUsageOf(p string, sum meta.Summary) pathUsage {
 	}
 }
 
-// volumeUsageOf 折 StatFS 计数与 Format.Capacity。只有 Capacity>0 时 avail 才有
-// 意义：未设配额时 StatFS 的 totalspace 是 1<<50 起的合成值。
+// volumeUsageOf 折 StatFS 计数与两个配额。空间与 inode 配额各自独立判定，
+// 因为 StatFS 对未设配额的那一侧返回的是合成值，不是真限额：
+//   - 未设空间配额（Capacity==0）时 totalspace 从 1<<50 起翻倍，avail 是假余量；
+//   - 未设 inode 配额（Inodes==0）时 iavail 固定 10<<20 起翻倍，同样是假余量。
+//
+// 把合成值当容量/余量会让进度条分母失真，所以只在配额真的设了（>0）时才带出对应
+// 的 avail 字段；未设的一侧保持 0，让消费方能区分「没有配额」和「还有多少」。
 func volumeUsageOf(format meta.Format, total, avail, iused, iavail uint64) volumeUsage {
 	used := uint64(0)
 	if total > avail {
@@ -143,6 +148,8 @@ func volumeUsageOf(format meta.Format, total, avail, iused, iavail uint64) volum
 	}
 	if format.Capacity > 0 {
 		v.Avail = avail
+	}
+	if format.Inodes > 0 {
 		v.AvailInodes = iavail
 	}
 	return v
