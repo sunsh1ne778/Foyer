@@ -16,6 +16,8 @@ Copy-Item -Path (Join-Path $src "cmd\stat.go") -Destination (Join-Path $dst "cmd
 Copy-Item -Path (Join-Path $src "cmd\stat_test.go") -Destination (Join-Path $dst "cmd\stat_test.go") -Force
 Copy-Item -Path (Join-Path $src "cmd\usage.go") -Destination (Join-Path $dst "cmd\usage.go") -Force
 Copy-Item -Path (Join-Path $src "cmd\usage_test.go") -Destination (Join-Path $dst "cmd\usage_test.go") -Force
+Copy-Item -Path (Join-Path $src "cmd\unflag.go") -Destination (Join-Path $dst "cmd\unflag.go") -Force
+Copy-Item -Path (Join-Path $src "cmd\unflag_test.go") -Destination (Join-Path $dst "cmd\unflag_test.go") -Force
 
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $reader = Join-Path $dst "pkg\vfs\reader.go"
@@ -37,6 +39,11 @@ if ($m -notmatch 'cmdImport\(\),') {
 if ($m -notmatch 'cmdStat\(\),') {
   $m2 = [regex]::Replace($m, '\t\t\tcmdImport\(\),\r?\n', "`t`t`tcmdImport(),`n`t`t`tcmdStat(),`n", 1)
   if ($m2 -eq $m) { throw "main.go cmdImport() hook site not found" }
+  $m = $m2
+}
+if ($m -notmatch 'cmdUnflag\(\),') {
+  $m2 = [regex]::Replace($m, '\t\t\tcmdStat\(\),\r?\n', "`t`t`tcmdStat(),`n`t`t`tcmdUnflag(),`n", 1)
+  if ($m2 -eq $m) { throw "main.go cmdStat() hook site not found" }
   $m = $m2
 }
 if ($m -notmatch 'cmdUsage\(\),') {

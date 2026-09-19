@@ -17,6 +17,8 @@ cp "$SRC/cmd/stat.go" "$DST/cmd/stat.go"
 cp "$SRC/cmd/stat_test.go" "$DST/cmd/stat_test.go"
 cp "$SRC/cmd/usage.go" "$DST/cmd/usage.go"
 cp "$SRC/cmd/usage_test.go" "$DST/cmd/usage_test.go"
+cp "$SRC/cmd/unflag.go" "$DST/cmd/unflag.go"
+cp "$SRC/cmd/unflag_test.go" "$DST/cmd/unflag_test.go"
 
 python3 - "$DST" <<'PY'
 import pathlib, sys
@@ -49,6 +51,12 @@ if "cmdStat()," not in text:
     text, n = re.subn(r"\t\t\tcmdImport\(\),\r?\n", "\t\t\tcmdImport(),\n\t\t\tcmdStat(),\n", text, count=1)
     if n != 1:
         raise SystemExit("main.go cmdImport() hook site not found")
+    changed = True
+if "cmdUnflag()," not in text:
+    import re
+    text, n = re.subn(r"\t\t\tcmdStat\(\),\r?\n", "\t\t\tcmdStat(),\n\t\t\tcmdUnflag(),\n", text, count=1)
+    if n != 1:
+        raise SystemExit("main.go cmdStat() hook site not found")
     changed = True
 if "cmdUsage()," not in text:
     import re

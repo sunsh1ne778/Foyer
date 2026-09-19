@@ -244,7 +244,7 @@ func metadataFor(obj object.Object, lookupUser, lookupGroup func(string) int) fi
 	if !ok {
 		return fm
 	}
-	fm.Mode = uint16(f.Mode().Perm() &^ 0222) // 写位必然无法生效（FlagImmutable），不留假象
+	fm.Mode = uint16(f.Mode().Perm() &^ 0222) // 内容直读外部源，写位只会骗人，直接去掉
 	if lookupUser != nil {
 		if uid := lookupUser(f.Owner()); uid >= 0 {
 			fm.Uid, fm.HasUid = uint32(uid), true
@@ -300,7 +300,7 @@ func importOne(m meta.Meta, ctx meta.Context, jpath string, obj object.Object, b
 	if st = m.Truncate(ctx, inode, 0, uint64(obj.Size()), &attr, true); st != 0 {
 		return st
 	}
-	// 时间必须写在 FlagImmutable 之前：immutable 之后写操作会被 meta 直接拒绝。
+	// 元数据（时间、属主）必须写在这里：内容只读靠 0444，不靠 immutable。
 	applyFileMetadata(m, ctx, inode, fm, summary)
 	if st = m.SetXattr(ctx, inode, vfs.ObjectXattr, []byte(obj.Key()), 0); st != 0 {
 		return st
@@ -308,12 +308,15 @@ func importOne(m meta.Meta, ctx meta.Context, jpath string, obj object.Object, b
 	if st = m.SetXattr(ctx, inode, vfs.BlobXattr, blobJSON, 0); st != 0 {
 		return st
 	}
-	attr.Flags = meta.FlagImmutable
-	return m.SetAttr(ctx, inode, meta.SetAttrFlag, 0, &attr)
+	// 刻意不设 FlagImmutable。导入的内容由 jfs.blob 指向外部源、经 compat reader 直读，
+	// 0444 已拦住普通写入；而 immutable 会让 meta 的 unlink 直接回 EPERM
+	// （pkg/meta/redis.go：attr.Flags&(FlagAppend|FlagImmutable) != 0 -> EPERM），
+	// 于是导入的文件永远删不掉——S3 网关还会把失败吞成 204，看起来像成功。
+	return 0
 }
 
 // applyFileMetadata 逐项 best-effort 写入源元数据：任何一项失败都只影响计数，不中断导入。
-// 内容是只读的（FlagImmutable），元数据丢失不该让整个对象失败。
+// 元数据没保留不影响内容可读，不该让整个导入失败。
 func applyFileMetadata(m meta.Meta, ctx meta.Context, inode meta.Ino, fm fileMeta, summary *importSummary) {
 	if fm.Mtime.IsZero() {
 		summary.MtimeMissing++
