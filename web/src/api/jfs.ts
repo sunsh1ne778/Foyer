@@ -483,3 +483,61 @@ export async function foyerUsage(paths: string[] = []): Promise<FoyerUsage> {
   if (!res.ok) throw new ApiError((await res.text()) || '读取用量失败', res.status);
   return (await res.json()) as FoyerUsage;
 }
+
+export type FoyerSearchMatch = {
+  /** 卷内绝对路径，由 overlay 归一（前导 /、无尾斜杠）。 */
+  path: string;
+  name: string;
+  /** "file" | "directory" | "symlink" | "other" */
+  type: string;
+  /** 对目录是元数据长度（通常 4096），与 `juicefs stat` 同口径。 */
+  size: number;
+  mtime: number;
+  mtimensec: number;
+};
+
+export type FoyerSearchFailure = {
+  path: string;
+  error: string;
+};
+
+export type FoyerSearchResult = {
+  keyword: string;
+  matches: FoyerSearchMatch[];
+  /** 访问过的真实条目数（不含合成的 . / ..）。 */
+  scanned: number;
+  /** 命中数撞上了 `FOYER_SEARCH_MAX_RESULTS`；false 表示结果是完整的。 */
+  truncated: boolean;
+  /** 缺席表示这次检索没有子树读取失败（不是「没有错误」的零值）。 */
+  errors?: FoyerSearchFailure[];
+};
+
+/**
+ * 按名称递归检索卷内路径，一次覆盖所有挂载。
+ *
+ * 用 URLSearchParams 拼 query：关键词可能含 `#`/空格/CJK（如 `#整理完成`），
+ * 手工拼串会被下游读成 fragment 并截断。
+ *
+ * 刻意不做防抖、不做并发控制：调用方（context）负责何时发起。
+ */
+export async function foyerSearch(
+  keyword: string,
+  path?: string,
+  opts?: { caseSensitive?: boolean }
+): Promise<FoyerSearchResult> {
+  const qs = new URLSearchParams();
+  qs.set('q', keyword);
+  const p = (path || '').trim();
+  if (p) qs.set('path', p);
+  if (opts?.caseSensitive) qs.set('case', '1');
+  const res = await fetch(`/foyer/search?${qs.toString()}`);
+  if (!res.ok) throw new ApiError((await res.text()) || '检索失败', res.status);
+  const data = (await res.json()) as Partial<FoyerSearchResult>;
+  return {
+    keyword: data.keyword || keyword,
+    matches: data.matches || [],
+    scanned: data.scanned || 0,
+    truncated: Boolean(data.truncated),
+    errors: data.errors,
+  };
+}

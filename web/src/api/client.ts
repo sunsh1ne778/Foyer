@@ -174,6 +174,13 @@ export async function previewLocalImport(name: string, root: string): Promise<jf
   return out.result;
 }
 
+export type FoyerSearchResult = jfs.FoyerSearchResult;
+
+/** 深度检索。与其它控制面调用一样，组件/context 只经 client 触达 jfs。 */
+export async function searchFiles(keyword: string, path = '/'): Promise<FoyerSearchResult> {
+  return jfs.foyerSearch(keyword, path);
+}
+
 export async function reconcileMount(_id: string): Promise<{ ok?: boolean; job_id?: string }> {
   unsupported('对账');
 }
